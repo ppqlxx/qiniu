@@ -10,6 +10,7 @@ events_bp = Blueprint("events", __name__, url_prefix="/api/events")
 
 @events_bp.route("", methods=["GET"])
 def list_events():
+    """按给定时间范围返回事件列表，供日历展示和提醒轮询使用。"""
     start, end, label = get_range_from_request(request.args)
     events = (
         Event.query
@@ -25,6 +26,7 @@ def list_events():
 
 @events_bp.route("", methods=["POST"])
 def create_event():
+    """根据请求体手动创建一条事件记录。"""
     data = request.get_json() or {}
     if not data.get("title") or not data.get("start_time"):
         return error_response("VALIDATION_ERROR", "title 和 start_time 为必填项", status=400)
@@ -51,6 +53,7 @@ def create_event():
 
 @events_bp.route("/<int:event_id>", methods=["DELETE"])
 def delete_event(event_id):
+    """按事件 ID 删除对应记录。"""
     event = Event.query.get(event_id)
     if not event:
         return error_response("EVENT_NOT_FOUND", "事件不存在", status=404)
@@ -62,6 +65,7 @@ def delete_event(event_id):
 
 @events_bp.route("/<int:event_id>", methods=["GET"])
 def get_event(event_id):
+    """按事件 ID 获取单条事件详情。"""
     event = Event.query.get(event_id)
     if not event:
         return error_response("EVENT_NOT_FOUND", "事件不存在", status=404)

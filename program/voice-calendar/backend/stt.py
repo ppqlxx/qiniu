@@ -12,23 +12,26 @@ _funasr_model = None
 
 
 def get_stt_provider():
+    """返回当前配置的语音识别 provider 名称。"""
     return STT_PROVIDER
 
 
 def _get_openai_client():
+    """延迟初始化 OpenAI 客户端，避免本地离线方案启动时强依赖该包。"""
     global _openai_client
     if _openai_client is None:
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError(
-                "鏈畨瑁?openai 鍖咃紝鑻ヨ浣跨敤鍦ㄧ嚎璇煶璇嗗埆璇峰厛瀹夎 requirements.txt 涓殑渚濊禆"
+                "未安装 openai 包，若要使用在线语音识别请先安装 requirements.txt 中的依赖"
             ) from exc
         _openai_client = OpenAI()
     return _openai_client
 
 
 def _save_temp_audio(audio_file):
+    """将上传的音频文件保存为临时文件，供后续识别流程读取。"""
     suffix = os.path.splitext(audio_file.filename or "")[-1] or ".webm"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         audio_file.save(tmp.name)
@@ -36,6 +39,7 @@ def _save_temp_audio(audio_file):
 
 
 def _transcribe_with_openai(audio_file):
+    """通过 OpenAI Whisper 接口完成语音转文字。"""
     client = _get_openai_client()
     tmp_path = _save_temp_audio(audio_file)
     try:
@@ -51,6 +55,7 @@ def _transcribe_with_openai(audio_file):
 
 
 def _get_funasr_model():
+    """延迟初始化本地 FunASR 模型实例。"""
     global _funasr_model
     if _funasr_model is not None:
         return _funasr_model
@@ -59,7 +64,7 @@ def _get_funasr_model():
         from funasr import AutoModel
     except ImportError as exc:
         raise RuntimeError(
-            "鏈畨瑁?funasr锛岃鍏堝湪 backend 鐜鎵ц pip install -r requirements.txt"
+            "未安装 funasr，请先在 backend 环境执行 pip install -r requirements.txt"
         ) from exc
 
     _funasr_model = AutoModel(
@@ -71,6 +76,7 @@ def _get_funasr_model():
 
 
 def _extract_funasr_text(result):
+    """从 FunASR 返回结果中提取统一的文本内容。"""
     if isinstance(result, list) and result:
         first = result[0]
         if isinstance(first, dict):
@@ -85,6 +91,7 @@ def _extract_funasr_text(result):
 
 
 def _transcribe_with_funasr(audio_file):
+    """通过本地 FunASR 模型完成语音转文字。"""
     tmp_path = _save_temp_audio(audio_file)
     try:
         model = _get_funasr_model()
@@ -103,8 +110,9 @@ def _transcribe_with_funasr(audio_file):
 
 
 def transcribe_audio(audio_file):
+    """根据配置选择在线或本地语音识别方案。"""
     if STT_PROVIDER == "openai":
         return _transcribe_with_openai(audio_file)
     if STT_PROVIDER == "funasr":
         return _transcribe_with_funasr(audio_file)
-    raise RuntimeError(f"涓嶆敮鎸佺殑 STT_PROVIDER: {STT_PROVIDER}")
+    raise RuntimeError(f"不支持的 STT_PROVIDER: {STT_PROVIDER}")

@@ -33,10 +33,12 @@ SYSTEM_PROMPT = """你是一个日历助手，将用户的语音转文字内容�
 
 
 def get_llm_provider():
+    """返回当前配置的意图解析 provider 名称。"""
     return LLM_PROVIDER
 
 
 def _normalize_intent(payload: dict, text: str) -> dict:
+    """将模型输出标准化为后端统一使用的意图结构。"""
     action = payload.get("action")
     if action not in {"add", "delete", "query"}:
         raise RuntimeError("模型未返回有效 action")
@@ -51,6 +53,7 @@ def _normalize_intent(payload: dict, text: str) -> dict:
         "raw_text": text,
     }
 
+    # 统一把模型返回的时间转换为后端后续可直接处理的 ISO 字符串。
     if payload.get("start_time"):
         normalized["start_time"] = parse_iso_datetime(payload["start_time"]).isoformat()
     if payload.get("end_time"):
@@ -67,6 +70,7 @@ def _normalize_intent(payload: dict, text: str) -> dict:
 
 
 def _get_openai_client():
+    """延迟初始化 OpenAI 客户端，避免本地离线方案启动时强依赖该包。"""
     global _openai_client
     if _openai_client is None:
         try:
@@ -80,6 +84,7 @@ def _get_openai_client():
 
 
 def _parse_with_openai(text: str, today: str) -> dict:
+    """通过 OpenAI 在线模型完成语音文本的意图解析。"""
     client = _get_openai_client()
     response = client.chat.completions.create(
         model=OPENAI_MODEL,
@@ -93,6 +98,7 @@ def _parse_with_openai(text: str, today: str) -> dict:
 
 
 def _parse_with_ollama(text: str, today: str) -> dict:
+    """通过本地 Ollama 服务完成语音文本的意图解析。"""
     model_name = _resolve_ollama_model()
     body = json.dumps({
         "model": model_name,
@@ -131,6 +137,7 @@ def _parse_with_ollama(text: str, today: str) -> dict:
 
 
 def _list_ollama_models():
+    """查询当前本地 Ollama 服务中已经安装的模型列表。"""
     req = request.Request(f"{OLLAMA_BASE_URL}/api/tags", method="GET")
     with request.urlopen(req, timeout=30) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
@@ -138,6 +145,7 @@ def _list_ollama_models():
 
 
 def _resolve_ollama_model():
+    """选择当前可用的本地 Ollama 模型，不存在时自动回退到已安装模型。"""
     try:
         installed = _list_ollama_models()
     except error.URLError as exc:
@@ -151,6 +159,7 @@ def _resolve_ollama_model():
     if OLLAMA_MODEL in installed:
         return OLLAMA_MODEL
 
+    # 优先排除 embedding 类模型，尽量选择可聊天的通用模型。
     preferred = [
         name for name in installed
         if "embedding" not in name.lower() and "bge" not in name.lower() and "embed" not in name.lower()
@@ -161,8 +170,10 @@ def _resolve_ollama_model():
 
 
 def parse_voice_intent(text: str) -> dict:
+    """根据 provider 配置解析语音文本，并返回标准化后的意图结果。"""
     today = datetime.now().strftime("%Y-%m-%d %A")
     try:
+        # 在线与本地模型共用统一输出结构，方便后端后续流程复用。
         if LLM_PROVIDER == "openai":
             payload = _parse_with_openai(text, today)
         elif LLM_PROVIDER == "ollama":

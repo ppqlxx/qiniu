@@ -12,6 +12,7 @@ load_dotenv()
 
 
 def create_app():
+    """创建 Flask 应用并完成数据库、路由与基础配置初始化。"""
     app = Flask(__name__)
     app.config["JSON_AS_ASCII"] = False
     CORS(app)
@@ -22,6 +23,7 @@ def create_app():
 
     @app.get("/api/health")
     def health():
+        """返回服务状态以及当前启用的 STT / LLM provider。"""
         return ok_response(
             data={
                 "status": "ok",
@@ -31,6 +33,7 @@ def create_app():
             message="服务运行正常",
         )
 
+    # 启动时打印路由，便于本地联调时确认接口是否注册成功。
     print("\n[Routes]")
     for rule in app.url_map.iter_rules():
         methods = ", ".join(sorted(rule.methods - {"HEAD", "OPTIONS"}))
