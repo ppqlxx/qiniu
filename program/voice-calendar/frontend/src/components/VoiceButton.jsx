@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getErrorMessage, postVoice } from "../api";
 
 export default function VoiceButton({ onResult, onError }) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [status, setStatus] = useState("idle");
   const [transcriptPreview, setTranscriptPreview] = useState("");
 
@@ -12,6 +13,30 @@ export default function VoiceButton({ onResult, onError }) {
 
   const isRecording = status === "recording";
   const isProcessing = status === "processing";
+
+  useEffect(() => {
+    if (!isModalOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isRecording && !isProcessing) {
+        setIsModalOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isModalOpen, isProcessing, isRecording]);
+
+  const openModal = () => {
+    setTranscriptPreview("");
+    setStatus("idle");
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    if (isRecording || isProcessing) return;
+    setIsModalOpen(false);
+  };
 
   const startRecording = async () => {
     if (isRecording || isProcessing) return;
@@ -43,6 +68,7 @@ export default function VoiceButton({ onResult, onError }) {
           setTranscriptPreview(result.data?.transcript || "");
           onResult?.(result);
           setStatus("idle");
+          setIsModalOpen(false);
         } catch (error) {
           setStatus("error");
           onError?.(getErrorMessage(error), error.response?.data?.data);
@@ -67,43 +93,66 @@ export default function VoiceButton({ onResult, onError }) {
   };
 
   return (
-    <div className="voice-button-card">
-      <button
-        className={[
-          "voice-button",
-          isRecording ? "voice-button-recording" : "",
-          isProcessing ? "voice-button-processing" : "",
-        ].join(" ")}
-        onPointerDown={startRecording}
-        onPointerUp={stopRecording}
-        onPointerLeave={stopRecording}
-        disabled={isProcessing}
-        type="button"
-      >
-        {isProcessing ? "⏳" : "🎤"}
+    <>
+      <button className="voice-trigger" onClick={openModal} type="button">
+        <span className="voice-trigger-icon">🎤</span>
       </button>
 
-      <div className="voice-helper">
-        {isRecording ? (
-          <>
-            <div className="wave" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
+      {isModalOpen ? (
+        <div className="modal-overlay" onClick={closeModal} role="presentation">
+          <div className="voice-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="voice-modal-header">
+              <div>
+                <h2>语音录入</h2>
+                <p>按住下方话筒开始录音，松开发送。</p>
+              </div>
+              <button className="modal-close" onClick={closeModal} type="button" aria-label="关闭">
+                ×
+              </button>
             </div>
-            <div>松开即可发送语音</div>
-          </>
-        ) : isProcessing ? (
-          "正在识别并解析语音..."
-        ) : (
-          "按住说话，松开发送"
-        )}
-      </div>
 
-      {transcriptPreview ? (
-        <div className="voice-helper">最近转写：{transcriptPreview}</div>
+            <div className="voice-modal-body">
+              <button
+                className={[
+                  "voice-button",
+                  isRecording ? "voice-button-recording" : "",
+                  isProcessing ? "voice-button-processing" : "",
+                ].join(" ")}
+                onPointerDown={startRecording}
+                onPointerUp={stopRecording}
+                onPointerLeave={stopRecording}
+                disabled={isProcessing}
+                type="button"
+              >
+                {isProcessing ? "⏳" : "🎤"}
+              </button>
+
+              <div className="voice-helper modal-helper">
+                {isRecording ? (
+                  <>
+                    <div className="wave" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <div>松开即可发送语音</div>
+                  </>
+                ) : isProcessing ? (
+                  "正在识别并解析语音..."
+                ) : (
+                  "点击并按住话筒开始录音"
+                )}
+              </div>
+
+              <div className="detail-block modal-detail-block">
+                <label>最近转写</label>
+                <div className="detail-surface">{transcriptPreview || "暂无"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
-    </div>
+    </>
   );
 }
