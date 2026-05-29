@@ -7,10 +7,11 @@ import { createEvent, deleteEvent, getErrorMessage, getEvents } from "./api";
 import VoiceButton from "./components/VoiceButton";
 
 const localizer = dayjsLocalizer(dayjs);
+const TIME_GRID_STEP_MINUTES = 60;
+const TIME_GRID_SLOTS_PER_GROUP = 1;
 
 const NAV_ITEMS = [
   { id: "calendar", icon: "📅", label: "小云日历" },
-  { id: "today", icon: "☀️", label: "今天" },
   { id: "history", icon: "🕘", label: "历史" },
   { id: "settings", icon: "⚙️", label: "设置" },
 ];
@@ -47,19 +48,19 @@ function speak(text) {
   window.speechSynthesis.speak(utterance);
 }
 
-function formatIntent(intent) {
-  if (!intent) return "暂无";
-  return JSON.stringify(intent, null, 2);
+function buildEventTooltip(event) {
+  const start = dayjs(event.start).format("MM-DD HH:mm");
+  const end = dayjs(event.end).format("MM-DD HH:mm");
+  const description = event.raw.description?.trim() || "暂无备注";
+  return `${event.title}\n${start} - ${end}\n${description}`;
 }
 
-function formatEventLine(event) {
+function formatHistoryLine(event) {
   return `${dayjs(event.start_time).format("MM-DD HH:mm")} · ${event.title}`;
 }
 
 function formatEventDetail(event) {
-  if (!event) {
-    return "将鼠标悬停在日历事件上，或点击事件查看详细时间安排。";
-  }
+  if (!event) return "暂无事件详情";
 
   const start = dayjs(event.start_time).format("YYYY-MM-DD HH:mm");
   const end = event.end_time ? dayjs(event.end_time).format("YYYY-MM-DD HH:mm") : "未设置";
@@ -68,11 +69,9 @@ function formatEventDetail(event) {
   return `开始：${start}\n结束：${end}\n备注：${description}`;
 }
 
-function buildEventTooltip(event) {
-  const start = dayjs(event.start).format("MM-DD HH:mm");
-  const end = dayjs(event.end).format("MM-DD HH:mm");
-  const description = event.raw.description?.trim() || "暂无备注";
-  return `${event.title}\n${start} - ${end}\n${description}`;
+function formatIntent(intent) {
+  if (!intent) return "暂无";
+  return JSON.stringify(intent, null, 2);
 }
 
 function createEmptyEventForm() {
@@ -84,11 +83,29 @@ function createEmptyEventForm() {
   };
 }
 
+function sameDate(left, right) {
+  return dayjs(left).isSame(dayjs(right), "day");
+}
+
+function formatViewHeading(view, date) {
+  if (view === "day") {
+    return dayjs(date).format("YYYY年MM月DD日 dddd");
+  }
+
+  if (view === "week") {
+    const start = dayjs(date).startOf("week");
+    const end = dayjs(date).endOf("week");
+    return `${start.format("MM月DD日")} - ${end.format("MM月DD日")}`;
+  }
+
+  return dayjs(date).format("YYYY年MM月DD日 dddd");
+}
+
 export default function App() {
   const currentRangeRef = useRef(null);
   const remindedEventKeysRef = useRef(new Set());
-  const calendarSectionRef = useRef(null);
   const historySectionRef = useRef(null);
+  const calendarSectionRef = useRef(null);
 
   const [activeNav, setActiveNav] = useState("calendar");
   const [events, setEvents] = useState([]);
@@ -98,9 +115,11 @@ export default function App() {
   const [queryEvents, setQueryEvents] = useState([]);
   const [voiceHistory, setVoiceHistory] = useState([]);
   const [recentActions, setRecentActions] = useState([]);
-  const [loadingEvents, setLoadingEvents] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [hoveredEvent, setHoveredEvent] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [eventForm, setEventForm] = useState(createEmptyEventForm());
+  const [loadingEvents, setLoadingEvents] = useState(false);
   const [currentView, setCurrentView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAddModal, setShowAddModal] = useState(false);
@@ -138,6 +157,20 @@ export default function App() {
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
+
+  useEffect(() => {
+    if (!selectedEvent) {
+      setEventForm(createEmptyEventForm());
+      return;
+    }
+
+    setEventForm({
+      title: selectedEvent.title,
+      start_time: dayjs(selectedEvent.start_time).format("YYYY-MM-DDTHH:mm"),
+      end_time: selectedEvent.end_time ? dayjs(selectedEvent.end_time).format("YYYY-MM-DDTHH:mm") : "",
+      description: selectedEvent.description || "",
+    });
+  }, [selectedEvent]);
 
   const addRecentAction = useCallback((text) => {
     const action = {
@@ -181,9 +214,22 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [checkReminders]);
 
-  const todayEvents = useMemo(
-    () => events.filter((event) => dayjs(event.start).isSame(dayjs(), "day")),
-    [events],
+  const selectedDateEvents = useMemo(
+    () => events.filter((event) => sameDate(event.start, selectedDate)),
+    [events, selectedDate],
+  );
+  const currentViewHeading = useMemo(
+    () => formatViewHeading(currentView, currentDate),
+    [currentDate, currentView],
+  );
+  const calendarFormats = useMemo(
+    () => ({
+      dayHeaderFormat: (date) => dayjs(date).format("MM月DD日 ddd"),
+      dayRangeHeaderFormat: ({ start, end }) =>
+        `${dayjs(start).format("MM月DD日")} - ${dayjs(end).format("MM月DD日")}`,
+      timeGutterFormat: (date) => dayjs(date).format("HH:mm"),
+    }),
+    [],
   );
 
   const focusEvent = hoveredEvent ?? selectedEvent;
@@ -219,40 +265,17 @@ export default function App() {
     if (details?.intent) {
       setLastIntent(details.intent);
     }
-
-    setVoiceHistory((previous) => [
-      {
-        id: `${Date.now()}-error`,
-        time: dayjs().format("MM-DD HH:mm:ss"),
-        transcript: details?.transcript || "暂无转写",
-        message,
-        action: "error",
-      },
-      ...previous,
-    ].slice(0, 8));
     addRecentAction(message);
-  };
-
-  const handleDeleteSelected = async () => {
-    if (!selectedEvent) return;
-    if (!window.confirm(`确认删除事件「${selectedEvent.title}」吗？`)) {
-      return;
-    }
-
-    try {
-      const response = await deleteEvent(selectedEvent.id);
-      setStatusMessage({ type: "success", text: response.message || "事件已删除" });
-      setSelectedEvent(null);
-      addRecentAction(response.message || "事件已删除");
-      speak(response.message);
-      await fetchEvents();
-    } catch (error) {
-      setStatusMessage({ type: "error", text: getErrorMessage(error) });
-    }
   };
 
   const handleSelectEvent = (event) => {
     setSelectedEvent(event.raw);
+    setSelectedDate(new Date(event.start));
+  };
+
+  const handleSelectSlot = ({ start }) => {
+    setSelectedDate(new Date(start));
+    setSelectedEvent(null);
   };
 
   const handleRangeChange = (nextRange) => {
@@ -260,16 +283,6 @@ export default function App() {
     if (!normalized) return;
     currentRangeRef.current = normalized;
     fetchEvents(normalized);
-  };
-
-  const handleSelectSlot = ({ start, end }) => {
-    setShowAddModal(true);
-    setNewEvent({
-      title: "",
-      start_time: dayjs(start).format("YYYY-MM-DDTHH:mm"),
-      end_time: dayjs(end).format("YYYY-MM-DDTHH:mm"),
-      description: "",
-    });
   };
 
   const handleCreateEvent = async () => {
@@ -288,10 +301,65 @@ export default function App() {
         description: newEvent.description.trim(),
       };
       const response = await createEvent(payload);
+      const createdEvent = response.data?.event;
       setShowAddModal(false);
       setNewEvent(createEmptyEventForm());
       setStatusMessage({ type: "success", text: response.message || "事件已创建" });
       addRecentAction(response.message || `创建事件：${payload.title}`);
+      if (createdEvent) {
+        setSelectedEvent(createdEvent);
+        setSelectedDate(new Date(createdEvent.start_time));
+      }
+      await fetchEvents();
+    } catch (error) {
+      setStatusMessage({ type: "error", text: getErrorMessage(error) });
+    }
+  };
+
+  const handleUpdateSelected = async () => {
+    if (!selectedEvent) return;
+    if (!eventForm.title.trim() || !eventForm.start_time) {
+      setStatusMessage({ type: "error", text: "请填写事件标题和开始时间" });
+      return;
+    }
+
+    try {
+      await deleteEvent(selectedEvent.id);
+      const payload = {
+        title: eventForm.title.trim(),
+        start_time: dayjs(eventForm.start_time).format("YYYY-MM-DDTHH:mm:ss"),
+        end_time: eventForm.end_time
+          ? dayjs(eventForm.end_time).format("YYYY-MM-DDTHH:mm:ss")
+          : null,
+        description: eventForm.description.trim(),
+      };
+      const response = await createEvent(payload);
+      const updatedEvent = response.data?.event;
+      setStatusMessage({ type: "success", text: "事件详情已更新" });
+      addRecentAction(`更新事件：${payload.title}`);
+      if (updatedEvent) {
+        setSelectedEvent(updatedEvent);
+        setSelectedDate(new Date(updatedEvent.start_time));
+      }
+      await fetchEvents();
+    } catch (error) {
+      setStatusMessage({ type: "error", text: getErrorMessage(error) });
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!selectedEvent) return;
+    if (!window.confirm(`确认删除事件「${selectedEvent.title}」吗？`)) {
+      return;
+    }
+
+    try {
+      const response = await deleteEvent(selectedEvent.id);
+      setStatusMessage({ type: "success", text: response.message || "事件已删除" });
+      setSelectedEvent(null);
+      setHoveredEvent(null);
+      addRecentAction(response.message || "事件已删除");
+      speak(response.message);
       await fetchEvents();
     } catch (error) {
       setStatusMessage({ type: "error", text: getErrorMessage(error) });
@@ -301,22 +369,14 @@ export default function App() {
   const handleNavAction = (itemId) => {
     setActiveNav(itemId);
 
-    if (itemId === "today") {
-      setCurrentDate(new Date());
-      setCurrentView("day");
-      currentRangeRef.current = null;
-      fetchEvents({ start: dayjs().startOf("day").toDate(), end: dayjs().endOf("day").toDate() });
+    if (itemId === "calendar") {
+      setCurrentView("month");
+      calendarSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
     if (itemId === "history") {
       historySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-
-    if (itemId === "calendar") {
-      setCurrentView("month");
-      calendarSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
@@ -336,222 +396,304 @@ export default function App() {
     </div>
   );
 
+  const showEmptyDetail = !selectedEvent && selectedDateEvents.length === 0;
+  const showDateList = !selectedEvent && selectedDateEvents.length > 0;
+
   return (
     <div className="page-shell">
-      <div className="app-shell">
-        <aside className="app-sidebar">
-          <div className="sidebar-brand">
-            <span className="sidebar-brand-icon">☁️</span>
-            <div>
-              <strong>小云</strong>
-              <span>日历</span>
-            </div>
+      <aside className="layout-sidebar">
+        <div className="sidebar-brand">
+          <span className="sidebar-brand-icon">☁️</span>
+          <div>
+            <strong>小云</strong>
+            <span>日历</span>
           </div>
+        </div>
 
-          <nav className="sidebar-nav">
-            {NAV_ITEMS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`sidebar-nav-item${activeNav === item.id ? " is-active" : ""}`}
-                onClick={() => handleNavAction(item.id)}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </nav>
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`sidebar-nav-item${activeNav === item.id ? " is-active" : ""}`}
+              onClick={() => handleNavAction(item.id)}
+            >
+              <span>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
 
-          <section className="sidebar-panel" ref={historySectionRef}>
-            <div className="sidebar-panel-header">
-              <h2>历史语音</h2>
-              <span>{voiceHistory.length} 条</span>
-            </div>
-            {voiceHistory.length > 0 ? (
-              <ul className="history-list">
-                {voiceHistory.map((item) => (
-                  <li key={item.id}>
-                    <div className="history-meta">
-                      <span>{item.time}</span>
-                      <span>{item.action}</span>
-                    </div>
-                    <strong>{item.transcript}</strong>
-                    <p>{item.message}</p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="sidebar-empty">暂无历史语音记录</div>
-            )}
-          </section>
-
-          <section className="sidebar-panel">
-            <div className="sidebar-panel-header">
-              <h2>查询结果摘要</h2>
-              <span>{queryEvents.length} 项</span>
-            </div>
-            {queryEvents.length > 0 ? (
-              <ul className="summary-list">
-                {queryEvents.map((event) => (
-                  <li key={`${event.id}-${event.start_time}`}>{formatEventLine(event)}</li>
-                ))}
-              </ul>
-            ) : (
-              <div className="sidebar-empty">最近一次语音查询还没有返回事件</div>
-            )}
-          </section>
-
-          <section className="sidebar-panel recent-panel">
-            <div className="sidebar-panel-header">
-              <h2>最近操作</h2>
-            </div>
-            {recentActions.length > 0 ? (
-              <ul className="recent-list">
-                {recentActions.map((item) => (
-                  <li key={item.id}>
+        <section className="sidebar-card" ref={historySectionRef}>
+          <div className="sidebar-card-header">
+            <h2>历史语音</h2>
+            <span>{voiceHistory.length} 条</span>
+          </div>
+          {voiceHistory.length > 0 ? (
+            <ul className="history-list">
+              {voiceHistory.map((item) => (
+                <li key={item.id}>
+                  <div className="history-meta">
                     <span>{item.time}</span>
-                    <p>{item.text}</p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="sidebar-empty">暂无最近操作</div>
-            )}
-          </section>
-        </aside>
+                    <span>{item.action}</span>
+                  </div>
+                  <strong>{item.transcript}</strong>
+                  <p>{item.message}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="sidebar-empty">暂无历史语音记录</div>
+          )}
+        </section>
 
-        <div className="app-main">
-          <header className="topbar">
-            <div className="topbar-left">
-              <h1>小云日历</h1>
-              <span>{dayjs(currentDate).format("YYYY年MM月DD日 dddd")}</span>
-            </div>
+        <section className="sidebar-card">
+          <div className="sidebar-card-header">
+            <h2>查询结果摘要</h2>
+            <span>{queryEvents.length} 项</span>
+          </div>
+          {queryEvents.length > 0 ? (
+            <ul className="summary-list">
+              {queryEvents.map((event) => (
+                <li key={`${event.id}-${event.start_time}`}>{formatHistoryLine(event)}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className="sidebar-empty">最近一次语音查询还没有返回事件</div>
+          )}
+        </section>
 
-            <div className="topbar-center">
-              <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
-            </div>
+        <section className="sidebar-card recent-card">
+          <div className="sidebar-card-header">
+            <h2>最近操作</h2>
+          </div>
+          {recentActions.length > 0 ? (
+            <ul className="recent-list">
+              {recentActions.map((item) => (
+                <li key={item.id}>
+                  <span>{item.time}</span>
+                  <p>{item.text}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="sidebar-empty">暂无最近操作</div>
+          )}
+        </section>
+      </aside>
 
-            <div className="topbar-right">
-              <button className="primary-button" onClick={() => setShowAddModal(true)} type="button">
-                + 新建
-              </button>
-              <div className="view-switcher">
-                {[
-                  { key: "month", label: "月" },
-                  { key: "week", label: "周" },
-                  { key: "day", label: "日" },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={currentView === item.key ? "is-active" : ""}
-                    onClick={() => setCurrentView(item.key)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </header>
-
-          <div className={`status-strip status-${statusMessage.type}`}>
-            <span className="status-label">当前状态</span>
-            <span>{statusMessage.text}</span>
+      <main className="layout-main">
+        <header className="topbar">
+          <div className="topbar-left">
+            <h1>小云日历</h1>
+            <span>{currentViewHeading}</span>
           </div>
 
-          <div className="workspace">
-            <section className="calendar-stage panel" ref={calendarSectionRef}>
+          <div className="topbar-center">
+            <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
+          </div>
+
+          <div className="topbar-right">
+            <button className="primary-button" onClick={() => setShowAddModal(true)} type="button">
+              + 新建事件
+            </button>
+            <div className="view-switcher">
+              {[
+                { key: "month", label: "月" },
+                { key: "week", label: "周" },
+                { key: "day", label: "日" },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={currentView === item.key ? "is-active" : ""}
+                  onClick={() => setCurrentView(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <div className={`status-strip status-${statusMessage.type}`}>
+          <span className="status-label">当前状态</span>
+          <span>{statusMessage.text}</span>
+        </div>
+
+        <section className="calendar-panel panel" ref={calendarSectionRef}>
+          <div className={`calendar-scroll calendar-scroll-${currentView}`}>
               <Calendar
                 className="calendar-widget"
                 localizer={localizer}
                 events={events}
+                step={TIME_GRID_STEP_MINUTES}
+                timeslots={TIME_GRID_SLOTS_PER_GROUP}
+                formats={calendarFormats}
                 view={currentView}
                 date={currentDate}
                 onView={setCurrentView}
-                onNavigate={setCurrentDate}
-                style={{ height: "100%" }}
-                onSelectEvent={handleSelectEvent}
-                onRangeChange={handleRangeChange}
-                onSelectSlot={handleSelectSlot}
-                selectable
-                tooltipAccessor={(event) => buildEventTooltip(event)}
-                components={{ event: CalendarEvent }}
-                toolbar={false}
-                messages={{
-                  next: "下一段",
-                  previous: "上一段",
-                  today: "今天",
-                  month: "月",
-                  week: "周",
-                  day: "日",
-                  agenda: "列表",
-                }}
-              />
+              onNavigate={(date) => {
+                setCurrentDate(date);
+                setSelectedDate(date);
+              }}
+              style={{ height: currentView === "month" ? 640 : "100%" }}
+              onSelectEvent={handleSelectEvent}
+              onSelectSlot={handleSelectSlot}
+              selectable
+              onRangeChange={handleRangeChange}
+              tooltipAccessor={(event) => buildEventTooltip(event)}
+              components={{ event: CalendarEvent }}
+              toolbar={false}
+              messages={{
+                next: "下一段",
+                previous: "上一段",
+                today: "今天",
+                month: "月",
+                week: "周",
+                day: "日",
+                agenda: "列表",
+                noEventsInRange: "当前时间范围暂无事件",
+              }}
+            />
+          </div>
+        </section>
+      </main>
+
+      <aside className="layout-detail panel">
+        {showEmptyDetail ? (
+          <div className="empty-detail-state">
+            <h2>今日没有安排，好好休息</h2>
+          </div>
+        ) : null}
+
+        {showDateList ? (
+          <section>
+            <div className="detail-header">
+              <h2>{dayjs(selectedDate).format("MM月DD日")}安排</h2>
+              <span>{selectedDateEvents.length} 项</span>
+            </div>
+            <ul className="today-list">
+              {selectedDateEvents.map((event) => (
+                <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
+                  <span className="today-dot" />
+                  <div>
+                    <strong>{event.title}</strong>
+                    <span>{dayjs(event.start).format("HH:mm")}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {selectedEvent ? (
+          <>
+            <section>
+              <div className="detail-header">
+                <h2>事件详情</h2>
+                <button
+                  className="ghost-button danger-button"
+                  onClick={handleDeleteSelected}
+                  type="button"
+                >
+                  删除事件
+                </button>
+              </div>
+
+              <div className="detail-block">
+                <label>详情预览</label>
+                <pre className="code-surface detail-code">{formatEventDetail(focusEvent)}</pre>
+              </div>
+
+              <div className="detail-block">
+                <label>事件标题</label>
+                <input
+                  type="text"
+                  value={eventForm.title}
+                  onChange={(event) => setEventForm((prev) => ({ ...prev, title: event.target.value }))}
+                />
+              </div>
+
+              <div className="detail-block">
+                <label>开始时间</label>
+                <input
+                  type="datetime-local"
+                  value={eventForm.start_time}
+                  onChange={(event) => setEventForm((prev) => ({ ...prev, start_time: event.target.value }))}
+                />
+              </div>
+
+              <div className="detail-block">
+                <label>结束时间</label>
+                <input
+                  type="datetime-local"
+                  value={eventForm.end_time}
+                  onChange={(event) => setEventForm((prev) => ({ ...prev, end_time: event.target.value }))}
+                />
+              </div>
+
+              <div className="detail-block">
+                <label>备注</label>
+                <textarea
+                  value={eventForm.description}
+                  onChange={(event) => setEventForm((prev) => ({ ...prev, description: event.target.value }))}
+                  rows={4}
+                />
+              </div>
+
+              <div className="detail-actions">
+                <button className="primary-button" type="button" onClick={handleUpdateSelected}>
+                  保存修改
+                </button>
+              </div>
             </section>
 
-            <aside className="detail-panel panel">
-              <section>
-                <div className="detail-header">
-                  <h2>事件详情</h2>
-                  <button
-                    className="ghost-button danger-button"
-                    onClick={handleDeleteSelected}
-                    type="button"
-                    disabled={!selectedEvent}
-                  >
-                    删除事件
-                  </button>
-                </div>
-                <div className="detail-block">
-                  <label>标题</label>
-                  <div className="detail-surface">{focusEvent?.title || "暂无选中事件"}</div>
-                </div>
-                <div className="detail-block">
-                  <label>时间安排</label>
-                  <pre className="code-surface detail-code">{formatEventDetail(focusEvent)}</pre>
-                </div>
-                <div className="detail-block">
-                  <label>最近一次结构化意图</label>
-                  <pre className="code-surface">{formatIntent(lastIntent)}</pre>
-                </div>
-                <div className="detail-block">
-                  <label>最近一次转写文本</label>
-                  <div className="detail-surface">{lastTranscript || "暂无"}</div>
-                </div>
-              </section>
+            <section className="today-panel">
+              <div className="detail-header">
+                <h2>{dayjs(selectedDate).format("MM月DD日")}安排</h2>
+                <span>{selectedDateEvents.length} 项</span>
+              </div>
+              <ul className="today-list">
+                {selectedDateEvents.map((event) => (
+                  <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
+                    <span className="today-dot" />
+                    <div>
+                      <strong>{event.title}</strong>
+                      <span>{dayjs(event.start).format("HH:mm")}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </>
+        ) : null}
 
-              <section className="today-panel">
-                <div className="detail-header">
-                  <h2>今日安排</h2>
-                  <span>{todayEvents.length} 项</span>
-                </div>
-                {todayEvents.length > 0 ? (
-                  <ul className="today-list">
-                    {todayEvents.map((event) => (
-                      <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
-                        <span className="today-dot" />
-                        <div>
-                          <strong>{event.title}</strong>
-                          <span>{dayjs(event.start).format("HH:mm")}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="sidebar-empty">今天还没有事件安排</div>
-                )}
-              </section>
-            </aside>
-          </div>
-        </div>
-      </div>
+        {!showEmptyDetail ? (
+          <>
+            <section className="today-panel">
+              <div className="detail-header">
+                <h2>最近一次结构化意图</h2>
+              </div>
+              <pre className="code-surface">{formatIntent(lastIntent)}</pre>
+            </section>
+
+            <section className="today-panel">
+              <div className="detail-header">
+                <h2>最近一次转写文本</h2>
+              </div>
+              <div className="detail-surface">{lastTranscript || "暂无"}</div>
+            </section>
+          </>
+        ) : null}
+      </aside>
 
       {showAddModal ? (
         <div className="modal-overlay" onClick={() => setShowAddModal(false)} role="presentation">
           <div className="create-modal panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             <div className="detail-header">
               <h2>新建事件</h2>
-              <button className="modal-close" type="button" onClick={() => setShowAddModal(false)}>
+              <button className="modal-close" type="button" onClick={() => setShowAddModal(false)} aria-label="关闭">
                 ×
               </button>
             </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { getErrorMessage, postVoice } from "../api";
 
@@ -94,65 +95,67 @@ export default function VoiceButton({ onResult, onError }) {
 
   return (
     <>
-      <button className="voice-trigger" onClick={openModal} type="button">
+      <button className="voice-trigger" onClick={openModal} type="button" aria-label="打开语音录入">
         <span className="voice-trigger-icon">🎤</span>
       </button>
 
-      {isModalOpen ? (
-        <div className="modal-overlay" onClick={closeModal} role="presentation">
-          <div className="voice-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+      {isModalOpen
+        ? createPortal(
+            <div className="modal-overlay" onClick={closeModal} role="presentation">
+              <div className="voice-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             <div className="voice-modal-header">
               <div>
                 <h2>语音录入</h2>
-                <p>按住下方话筒开始录音，松开发送。</p>
               </div>
               <button className="modal-close" onClick={closeModal} type="button" aria-label="关闭">
                 ×
               </button>
-            </div>
+                </div>
 
-            <div className="voice-modal-body">
-              <button
-                className={[
-                  "voice-button",
-                  isRecording ? "voice-button-recording" : "",
-                  isProcessing ? "voice-button-processing" : "",
-                ].join(" ")}
-                onPointerDown={startRecording}
-                onPointerUp={stopRecording}
-                onPointerLeave={stopRecording}
-                disabled={isProcessing}
-                type="button"
-              >
-                {isProcessing ? "⏳" : "🎤"}
-              </button>
+                <div className="voice-modal-body">
+                  <button
+                    className={[
+                      "voice-button",
+                      isRecording ? "voice-button-recording" : "",
+                      isProcessing ? "voice-button-processing" : "",
+                    ].join(" ")}
+                    onPointerDown={startRecording}
+                    onPointerUp={stopRecording}
+                    onPointerLeave={stopRecording}
+                    disabled={isProcessing}
+                    type="button"
+                  >
+                    {isProcessing ? "⏳" : "🎤"}
+                  </button>
 
-              <div className="voice-helper modal-helper">
+                  <div className="voice-helper modal-helper">
                 {isRecording ? (
-                  <>
-                    <div className="wave" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                      <span />
-                    </div>
+                      <>
+                        <div className="wave" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                          <span />
+                        </div>
                     <div>松开即可发送语音</div>
                   </>
                 ) : isProcessing ? (
                   "正在识别并解析语音..."
                 ) : (
-                  "点击并按住话筒开始录音"
+                  "按住上方话筒开始录音，松开发送。"
                 )}
               </div>
 
-              <div className="detail-block modal-detail-block">
-                <label>最近转写</label>
-                <div className="detail-surface">{transcriptPreview || "暂无"}</div>
+                  <div className="detail-block modal-detail-block">
+                    <label>最近转写</label>
+                    <div className="detail-surface">{transcriptPreview || "暂无"}</div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
