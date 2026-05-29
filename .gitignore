@@ -8,3 +8,5 @@ program/voice-calendar/frontend/dist/
 program/voice-calendar/frontend/.vite/
 program/voice-calendar/frontend/frontend.out.log
 program/voice-calendar/frontend/frontend.err.log
+program/voice-calendar/frontend/frontend.dev.out.log
+program/voice-calendar/frontend/frontend.dev.err.log
