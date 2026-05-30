@@ -115,6 +115,123 @@ def _execute_intent(intent):
     raise VoiceIntentError("INTENT_PARSE_FAILED", "抱歉，没有识别到有效的操作指令", status=400)
 
 
+@voice_bp.route("/parse", methods=["POST"])
+def parse_only():
+    """仅调用 LLM 解析意图列表，不执行任何数据库操作，用于前端确认前的预览。"""
+    body = request.get_json() or {}
+    transcript = (body.get("transcript") or "").strip()
+    if not transcript:
+        return error_response("TRANSCRIPT_EMPTY", "transcript 字段不能为空", status=400)
+
+    try:
+        intents = parse_voice_intent(transcript)
+    except Exception as exc:
+        return error_response("INTENT_PARSE_FAILED", f"意图解析失败：{str(exc)}", status=500,
+                              data={"transcript": transcript})
+
+    return ok_response(data={"intents": intents, "transcript": transcript})
+
+
+@voice_bp.route("/confirm", methods=["POST"])
+def confirm_intent():
+    """接收前端已确认的 intents 列表，批量执行数据库操作，不再调用 LLM。"""
+    body = request.get_json() or {}
+    intents = body.get("intents")
+    transcript = (body.get("transcript") or "").strip()
+
+    # 兼容前端传单个 intent 对象的情况
+    if isinstance(intents, dict):
+        intents = [intents]
+    if not intents:
+        return error_response("INTENT_EMPTY", "intents 字段不能为空", status=400)
+
+    results = []
+    all_events = []
+    messages = []
+
+    for intent in intents:
+        try:
+            message, data = _execute_intent(intent)
+            results.append({"intent": intent, "message": message, "data": data})
+            messages.append(message)
+            if "event" in data:
+                all_events.append(data["event"])
+            if "events" in data:
+                all_events.extend(data["events"])
+        except VoiceIntentError as exc:
+            db.session.rollback()
+            return error_response(exc.error_code, exc.message, status=exc.status,
+                                  data={"transcript": transcript, "intent": intent})
+        except Exception as exc:
+            db.session.rollback()
+            return error_response("INTERNAL_ERROR", f"执行失败：{str(exc)}", status=500,
+                                  data={"transcript": transcript, "intent": intent})
+
+    combined_message = "；".join(messages)
+    # 取第一个 intent 作为跳转依据（add/delete 场景）
+    primary_intent = intents[0] if intents else None
+    return ok_response(
+        message=combined_message,
+        intent=primary_intent,
+        data={"transcript": transcript, "events": all_events, "results": results},
+    )
+
+
+@voice_bp.route("/transcribe", methods=["POST"])
+def transcribe_only():
+    """仅做语音转文字，快速返回转写结果，不调用 LLM。"""
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return error_response("AUDIO_EMPTY", "请上传音频文件，字段名为 audio", status=400)
+
+    try:
+        transcript = transcribe_audio(audio_file)
+    except Exception as exc:
+        return error_response("STT_FAILED", f"语音识别失败：{str(exc)}", status=500)
+
+    return ok_response(data={"transcript": transcript})
+
+
+@voice_bp.route("/execute", methods=["POST"])
+def execute_only():
+    """接收转写文本，调用 LLM 解析意图列表并批量执行数据库操作。"""
+    body = request.get_json() or {}
+    transcript = (body.get("transcript") or "").strip()
+    if not transcript:
+        return error_response("TRANSCRIPT_EMPTY", "transcript 字段不能为空", status=400)
+
+    try:
+        intents = parse_voice_intent(transcript)
+    except Exception as exc:
+        return error_response("INTENT_PARSE_FAILED", f"意图解析失败：{str(exc)}", status=500,
+                              data={"transcript": transcript})
+
+    messages = []
+    all_events = []
+    for intent in intents:
+        try:
+            message, data = _execute_intent(intent)
+            messages.append(message)
+            if "event" in data:
+                all_events.append(data["event"])
+            if "events" in data:
+                all_events.extend(data["events"])
+        except VoiceIntentError as exc:
+            db.session.rollback()
+            return error_response(exc.error_code, exc.message, status=exc.status,
+                                  data={"transcript": transcript, "intent": intent})
+        except Exception as exc:
+            db.session.rollback()
+            return error_response("INTERNAL_ERROR", f"执行失败：{str(exc)}", status=500,
+                                  data={"transcript": transcript, "intent": intent})
+
+    return ok_response(
+        message="；".join(messages),
+        intent=intents[0] if intents else None,
+        data={"transcript": transcript, "events": all_events},
+    )
+
+
 @voice_bp.route("", methods=["POST"])
 def handle_voice():
     """处理语音主入口，串联转写、意图解析和数据库操作。"""
@@ -123,7 +240,6 @@ def handle_voice():
         return error_response("AUDIO_EMPTY", "请上传音频文件，字段名为 audio", status=400)
 
     try:
-        # 先完成音频转文字，再把结果交给意图解析模块处理。
         transcript = transcribe_audio(audio_file)
     except Exception as exc:
         return error_response("STT_FAILED", f"语音识别失败：{str(exc)}", status=500)
@@ -139,7 +255,6 @@ def handle_voice():
         )
 
     try:
-        # 统一由意图执行器分派新增、查询和删除逻辑。
         message, data = _execute_intent(intent)
     except VoiceIntentError as exc:
         return error_response(

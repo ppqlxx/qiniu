@@ -1,14 +1,13 @@
 import os
 import tempfile
 from pathlib import Path
+from urllib import request as urllib_request, error as urllib_error
 
 STT_PROVIDER = os.getenv("STT_PROVIDER", "funasr").lower()
 OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "whisper-1")
-FUNASR_MODEL = os.getenv("FUNASR_MODEL", "iic/SenseVoiceSmall")
-FUNASR_DEVICE = os.getenv("FUNASR_DEVICE", "cpu")
+FUNASR_HTTP_URL = os.getenv("FUNASR_HTTP_URL", "http://127.0.0.1:10095").rstrip("/")
 
 _openai_client = None
-_funasr_model = None
 
 
 def get_stt_provider():
@@ -54,56 +53,41 @@ def _transcribe_with_openai(audio_file):
         Path(tmp_path).unlink(missing_ok=True)
 
 
-def _get_funasr_model():
-    """延迟初始化本地 FunASR 模型实例。"""
-    global _funasr_model
-    if _funasr_model is not None:
-        return _funasr_model
-
-    try:
-        from funasr import AutoModel
-    except ImportError as exc:
-        raise RuntimeError(
-            "未安装 funasr，请先在 backend 环境执行 pip install -r requirements.txt"
-        ) from exc
-
-    _funasr_model = AutoModel(
-        model=FUNASR_MODEL,
-        trust_remote_code=True,
-        device=FUNASR_DEVICE,
-    )
-    return _funasr_model
-
-
-def _extract_funasr_text(result):
-    """从 FunASR 返回结果中提取统一的文本内容。"""
-    if isinstance(result, list) and result:
-        first = result[0]
-        if isinstance(first, dict):
-            return first.get("text", "").strip()
-        if isinstance(first, str):
-            return first.strip()
-    if isinstance(result, dict):
-        return str(result.get("text", "")).strip()
-    if isinstance(result, str):
-        return result.strip()
-    return ""
-
-
 def _transcribe_with_funasr(audio_file):
-    """通过本地 FunASR 模型完成语音转文字。"""
+    """将音频转发到本地 FunASR HTTP 服务（asr-service）完成语音转文字。"""
+    import json
+    import uuid
+
     tmp_path = _save_temp_audio(audio_file)
     try:
-        model = _get_funasr_model()
-        result = model.generate(
-            input=tmp_path,
-            cache={},
-            language="zh",
-            use_itn=True,
+        boundary = uuid.uuid4().hex
+        filename = Path(tmp_path).name
+        with open(tmp_path, "rb") as f:
+            audio_data = f.read()
+
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="audio"; filename="{filename}"\r\n'
+            f"Content-Type: audio/webm\r\n\r\n"
+        ).encode() + audio_data + f"\r\n--{boundary}--\r\n".encode()
+
+        req = urllib_request.Request(
+            f"{FUNASR_HTTP_URL}/transcribe",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
         )
-        text = _extract_funasr_text(result)
+        try:
+            with urllib_request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except urllib_error.URLError as exc:
+            raise RuntimeError(
+                f"无法连接到 FunASR 服务，请确认 asr-service 正在运行（{FUNASR_HTTP_URL}）"
+            ) from exc
+
+        text = result.get("text", "").strip()
         if not text:
-            raise RuntimeError("FunASR 未返回有效文本")
+            raise RuntimeError("FunASR 服务未返回有效文本")
         return text
     finally:
         Path(tmp_path).unlink(missing_ok=True)
