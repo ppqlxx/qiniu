@@ -516,9 +516,6 @@ export default function App() {
     </div>
   );
 
-  const showEmptyDetail = !selectedEvent && selectedDateEvents.length === 0;
-  const showDateList = !selectedEvent && selectedDateEvents.length > 0;
-
   return (
     <div className={`page-shell${pageMode === "history" ? " history-mode" : ""}`}>
       <aside className="layout-sidebar">
@@ -748,30 +745,31 @@ export default function App() {
 
       {pageMode === "calendar" ? (
         <aside className="layout-detail panel">
-          {showEmptyDetail ? (
+          {!selectedEvent ? (
             <div className="empty-detail-state">
-              <h2>今日没有安排，好好休息</h2>
-            </div>
-          ) : null}
+              <div className="empty-detail-illustration">🌱</div>
+              <p className="empty-detail-hint">点击日历上的事件</p>
+              <p className="empty-detail-hint-sub">在这里查看详情或编辑</p>
 
-          {showDateList ? (
-            <section>
-              <div className="detail-header">
-                <h2>{dayjs(selectedDate).format("MM月DD日")}安排</h2>
-                <span>{selectedDateEvents.length} 项</span>
+              <div className="today-schedule">
+                <span className="today-schedule-label">今日安排</span>
+                {selectedDateEvents.length === 0 ? (
+                  <p className="today-schedule-empty">今天暂无事件</p>
+                ) : (
+                  <ul className="today-list">
+                    {selectedDateEvents.map((event) => (
+                      <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
+                        <span className="today-dot" />
+                        <div>
+                          <strong>{event.title}</strong>
+                          <span>{dayjs(event.start).format("HH:mm")}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <ul className="today-list">
-                {selectedDateEvents.map((event) => (
-                  <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
-                    <span className="today-dot" />
-                    <div>
-                      <strong>{event.title}</strong>
-                      <span>{dayjs(event.start).format("HH:mm")}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            </div>
           ) : null}
 
           {selectedEvent ? (
@@ -852,7 +850,7 @@ export default function App() {
             </>
           ) : null}
 
-          {!showEmptyDetail ? (
+          {selectedEvent ? (
             <>
               <section className="today-panel">
                 <div className="detail-header">

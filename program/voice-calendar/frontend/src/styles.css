@@ -735,19 +735,56 @@ button {
 }
 
 .empty-detail-state {
-  display: grid;
-  place-items: center;
-  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px 24px;
   border-radius: 24px;
   background: linear-gradient(180deg, rgba(240, 253, 250, 0.8) 0%, rgba(236, 254, 255, 0.8) 100%);
   text-align: center;
 }
 
-.empty-detail-state h2 {
-  margin: 0;
+.empty-detail-illustration {
+  font-size: 64px;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.empty-detail-hint {
+  margin: 0 0 4px;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.empty-detail-hint-sub {
+  margin: 0 0 28px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.today-schedule {
+  width: 100%;
+  text-align: left;
+  padding-top: 16px;
+  border-top: 1px solid #d4f4ea;
+}
+
+.today-schedule-label {
+  display: block;
+  margin-bottom: 12px;
   color: #0f766e;
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.today-schedule-empty {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+  padding: 12px 0;
 }
 
 .modal-overlay {
