@@ -12,23 +12,49 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:latest")
 
 _openai_client = None
 
-SYSTEM_PROMPT = """你是一个日历助手，将用户的语音转文字内容解析为结构化 JSON 指令。
-今天是 {today}，用户时区为 Asia/Shanghai。
+SYSTEM_PROMPT = """你是一个智能日历助手，擅长从口语化描述中提取所有活动并编排成合理日程。
+现在是 {now}，用户时区为 Asia/Shanghai。
 
-请严格按照以下格式返回 JSON，只返回 JSON，不要包含任何其他文字：
+## 输出格式
+只返回如下 JSON，不要有任何多余文字：
 {{
-  "action": "add" | "delete" | "query",
-  "title": "事件名称（add 和 delete 时尽量填写）",
-  "start_time": "ISO8601 格式时间（add 时必填，delete 时可选，例如 2025-05-30T15:00:00）",
-  "end_time": "ISO8601 格式时间（可选，默认为 start_time 加一小时）",
-  "description": "备注说明（可选）",
-  "query_range": "today | tomorrow | this_week（仅 query 时必填）"
+  "intents": [
+    {{
+      "action": "add" | "delete" | "query",
+      "title": "事件名称",
+      "start_time": "ISO8601，如 2025-05-30T09:00:00（add 必填）",
+      "end_time":   "ISO8601（add 必填，根据时长推算）",
+      "description": "备注，把不确定因素写在这里（可选）",
+      "query_range": "today | tomorrow | this_week（仅 query 必填）"
+    }}
+  ]
 }}
 
-示例：
-- 用户说"明天下午三点开组会" → action=add, title=组会, start_time=明天15:00
-- 用户说"取消明天的组会" → action=delete, title=组会, start_time=明天
-- 用户说"我今天有什么安排" → action=query, query_range=today
+## 相关性判断
+内容与日历/事件/安排/提醒完全无关（纯闲聊、问天气等）→ 返回 {{"intents": []}}。
+
+## 编排规则（用户说"帮我安排"时严格执行）
+
+### 时间推算
+- 没有给出具体时刻时，根据常识推断：上午 08:00 开始，中午 12:00，下午 13:30，晚上 19:00。
+- 时长模糊（"六七个小时"）→ 取中间值（6.5 小时）。
+- 时长未提及 → 按活动类型估算：吃饭 1h，购物 30min，洗衣 1h，背单词/学习 1h，游戏/娱乐 1h，睡觉 8h。
+- 事件之间留 5-10 分钟缓冲。
+
+### 不确定活动
+- "也可能 X"、"或者 X" → 仍然创建事件，在 description 中注明"可能调整"。
+- 语音识别噪声（无意义词句）直接忽略，不影响日程。
+
+### 完整性
+- 提取用户提到的**每一项**独立活动，一项都不能漏。
+- 有硬性截止时间的（"11点半前睡"）→ 先定好截止事件，其余活动在截止前倒排。
+- 按活动先后顺序首尾相接排列，不允许时间重叠。
+
+## 示例
+- "明天下午三点开组会" → intents=[{{add, 组会, 明天15:00~16:00}}]
+- "取消明天的组会" → intents=[{{delete, 组会}}]
+- "今天有什么安排" → intents=[{{query, query_range=today}}]
+- "今天天气怎么样" → intents=[]
 """
 
 
@@ -83,21 +109,21 @@ def _get_openai_client():
     return _openai_client
 
 
-def _parse_with_openai(text: str, today: str) -> dict:
+def _parse_with_openai(text: str, now: str) -> dict:
     """通过 OpenAI 在线模型完成语音文本的意图解析。"""
     client = _get_openai_client()
     response = client.chat.completions.create(
         model=OPENAI_MODEL,
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT.format(today=today)},
+            {"role": "system", "content": SYSTEM_PROMPT.format(now=now)},
             {"role": "user", "content": text},
         ],
     )
     return json.loads(response.choices[0].message.content)
 
 
-def _parse_with_ollama(text: str, today: str) -> dict:
+def _parse_with_ollama(text: str, now: str) -> dict:
     """通过本地 Ollama 服务完成语音文本的意图解析。"""
     model_name = _resolve_ollama_model()
     body = json.dumps({
@@ -105,7 +131,7 @@ def _parse_with_ollama(text: str, today: str) -> dict:
         "stream": False,
         "format": "json",
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT.format(today=today)},
+            {"role": "system", "content": SYSTEM_PROMPT.format(now=now)},
             {"role": "user", "content": text},
         ],
         "options": {
@@ -169,18 +195,25 @@ def _resolve_ollama_model():
     return installed[0]
 
 
-def parse_voice_intent(text: str) -> dict:
-    """根据 provider 配置解析语音文本，并返回标准化后的意图结果。"""
-    today = datetime.now().strftime("%Y-%m-%d %A")
+def parse_voice_intent(text: str) -> list:
+    """根据 provider 配置解析语音文本，返回标准化意图列表（支持多事件）。"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
     try:
-        # 在线与本地模型共用统一输出结构，方便后端后续流程复用。
         if LLM_PROVIDER == "openai":
-            payload = _parse_with_openai(text, today)
+            payload = _parse_with_openai(text, now)
         elif LLM_PROVIDER == "ollama":
-            payload = _parse_with_ollama(text, today)
+            payload = _parse_with_ollama(text, now)
         else:
             raise RuntimeError(f"不支持的 LLM_PROVIDER: {LLM_PROVIDER}")
 
-        return _normalize_intent(payload, text)
+        # 兼容新格式 {"intents": [...]} 和旧格式单对象
+        if "intents" in payload and isinstance(payload["intents"], list):
+            raw_list = payload["intents"]
+        elif isinstance(payload, list):
+            raw_list = payload
+        else:
+            raw_list = [payload]
+
+        return [_normalize_intent(item, text) for item in raw_list]
     except Exception as exc:
         raise RuntimeError(f"LLM 解析失败: {str(exc)}")
