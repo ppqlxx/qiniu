@@ -332,6 +332,30 @@ export default function App() {
     setStatusMessage({ type: "success", text: result.message || "操作成功" });
     recordVoiceHistory(result, "success");
     speak(result.message);
+
+    const intent = result.intent;
+
+    if (intent?.action === "query" && intent?.query_range?.start) {
+      // 跳转到查询日期范围，切换到周视图方便查看事件时间
+      const targetDate = new Date(intent.query_range.start);
+      syncCalendarContext("week", targetDate);
+      setSelectedDate(targetDate);
+      // 有事件则选中第一条，右侧面板展示详情
+      const firstEvent = result.data?.events?.[0];
+      if (firstEvent) setSelectedEvent(firstEvent);
+      return;
+    }
+
+    if (intent?.action === "add" && result.data?.event) {
+      // 跳转到新建事件所在日期并选中
+      const event = result.data.event;
+      const targetDate = new Date(event.start_time);
+      syncCalendarContext("week", targetDate);
+      setSelectedDate(targetDate);
+      setSelectedEvent(event);
+      return;
+    }
+
     await fetchEvents(currentRangeRef.current);
   };
 
