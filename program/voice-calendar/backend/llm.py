@@ -98,14 +98,17 @@ def _get_qwen_client():
         if not DASHSCOPE_API_KEY:
             raise RuntimeError("未配置 DASHSCOPE_API_KEY")
         try:
+            import httpx
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError(
-                "未安装 openai 包，请执行: pip install openai"
+                "未安装依赖包，请执行: pip install openai httpx"
             ) from exc
+        # 显式传入 http_client 以绕过系统代理配置与 httpx 版本兼容问题
         _qwen_client = OpenAI(
             api_key=DASHSCOPE_API_KEY,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            http_client=httpx.Client(),
         )
     return _qwen_client
 
