@@ -9,6 +9,8 @@ import VoiceButton from "./components/VoiceButton";
 const localizer = dayjsLocalizer(dayjs);
 const TIME_GRID_STEP_MINUTES = 60;
 const TIME_GRID_SLOTS_PER_GROUP = 1;
+const MONTH_LABELS = Array.from({ length: 12 }, (_, index) => `${index + 1}月`);
+const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
 
 const NAV_ITEMS = [
   { id: "calendar", icon: "📅", label: "小云日历" },
@@ -34,9 +36,11 @@ function normalizeCalendarRange(range) {
   if (Array.isArray(range) && range.length > 0) {
     return { start: range[0], end: range[range.length - 1] };
   }
+
   if (range?.start && range?.end) {
     return { start: range.start, end: range.end };
   }
+
   return null;
 }
 
@@ -88,25 +92,62 @@ function sameDate(left, right) {
 }
 
 function formatViewHeading(view, date) {
-  if (view === "day") {
-    return dayjs(date).format("YYYY年MM月DD日 dddd");
+  if (view === "year") {
+    return dayjs(date).format("YYYY年");
   }
 
   if (view === "week") {
     const start = dayjs(date).startOf("week");
     const end = dayjs(date).endOf("week");
-    return `${start.format("MM月DD日")} - ${end.format("MM月DD日")}`;
+    return `${start.format("YYYY年MM月DD日")} - ${end.format("MM月DD日")}`;
   }
 
-  return dayjs(date).format("YYYY年MM月DD日 dddd");
+  return dayjs(date).format("YYYY年MM月");
+}
+
+function getRangeForCalendarView(view, date) {
+  const point = dayjs(date);
+
+  if (view === "year") {
+    return {
+      start: point.startOf("year").startOf("week").toDate(),
+      end: point.endOf("year").endOf("week").toDate(),
+    };
+  }
+
+  if (view === "week") {
+    return {
+      start: point.startOf("week").toDate(),
+      end: point.endOf("week").toDate(),
+    };
+  }
+
+  return {
+    start: point.startOf("month").startOf("week").toDate(),
+    end: point.endOf("month").endOf("week").toDate(),
+  };
+}
+
+function createYearMonthCells(monthDate) {
+  const first = monthDate.startOf("month").startOf("week");
+  const last = monthDate.endOf("month").endOf("week");
+  const cells = [];
+  let cursor = first;
+
+  while (cursor.isBefore(last) || cursor.isSame(last, "day")) {
+    cells.push(cursor);
+    cursor = cursor.add(1, "day");
+  }
+
+  return cells;
 }
 
 export default function App() {
   const currentRangeRef = useRef(null);
   const remindedEventKeysRef = useRef(new Set());
-  const historySectionRef = useRef(null);
   const calendarSectionRef = useRef(null);
 
+  const [pageMode, setPageMode] = useState("calendar");
   const [activeNav, setActiveNav] = useState("calendar");
   const [events, setEvents] = useState([]);
   const [statusMessage, setStatusMessage] = useState({ type: "info", text: "准备就绪" });
@@ -218,18 +259,45 @@ export default function App() {
     () => events.filter((event) => sameDate(event.start, selectedDate)),
     [events, selectedDate],
   );
+
+  const currentYear = dayjs(currentDate).year();
+  const currentMonth = dayjs(currentDate).month();
+  const yearOptions = useMemo(
+    () => Array.from({ length: 11 }, (_, index) => currentYear - 5 + index),
+    [currentYear],
+  );
   const currentViewHeading = useMemo(
     () => formatViewHeading(currentView, currentDate),
     [currentDate, currentView],
   );
   const calendarFormats = useMemo(
     () => ({
-      dayHeaderFormat: (date) => dayjs(date).format("MM月DD日 ddd"),
       dayRangeHeaderFormat: ({ start, end }) =>
         `${dayjs(start).format("MM月DD日")} - ${dayjs(end).format("MM月DD日")}`,
       timeGutterFormat: (date) => dayjs(date).format("HH:mm"),
     }),
     [],
+  );
+  const yearEventCounts = useMemo(() => {
+    const counts = new Map();
+    events.forEach((event) => {
+      const key = dayjs(event.start).format("YYYY-MM-DD");
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return counts;
+  }, [events]);
+  const yearViewMonths = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, monthIndex) => {
+        const monthDate = dayjs(currentDate).year(currentYear).month(monthIndex).startOf("month");
+        return {
+          monthIndex,
+          monthDate,
+          monthLabel: MONTH_LABELS[monthIndex],
+          cells: createYearMonthCells(monthDate),
+        };
+      }),
+    [currentDate, currentYear],
   );
 
   const focusEvent = hoveredEvent ?? selectedEvent;
@@ -247,6 +315,16 @@ export default function App() {
     addRecentAction(result.message || "完成语音操作");
   }, [addRecentAction]);
 
+  const syncCalendarContext = useCallback((view, date) => {
+    const nextDate = new Date(date);
+    setCurrentView(view);
+    setCurrentDate(nextDate);
+    setSelectedDate(nextDate);
+    const nextRange = getRangeForCalendarView(view, nextDate);
+    currentRangeRef.current = nextRange;
+    fetchEvents(nextRange);
+  }, [fetchEvents]);
+
   const handleVoiceResult = async (result) => {
     setLastTranscript(result.data?.transcript || result.intent?.raw_text || "");
     setLastIntent(result.intent || null);
@@ -254,7 +332,31 @@ export default function App() {
     setStatusMessage({ type: "success", text: result.message || "操作成功" });
     recordVoiceHistory(result, "success");
     speak(result.message);
-    await fetchEvents();
+
+    const intent = result.intent;
+
+    if (intent?.action === "query" && intent?.query_range?.start) {
+      // 跳转到查询日期范围，切换到周视图方便查看事件时间
+      const targetDate = new Date(intent.query_range.start);
+      syncCalendarContext("week", targetDate);
+      setSelectedDate(targetDate);
+      // 有事件则选中第一条，右侧面板展示详情
+      const firstEvent = result.data?.events?.[0];
+      if (firstEvent) setSelectedEvent(firstEvent);
+      return;
+    }
+
+    if (intent?.action === "add" && result.data?.event) {
+      // 跳转到新建事件所在日期并选中
+      const event = result.data.event;
+      const targetDate = new Date(event.start_time);
+      syncCalendarContext("week", targetDate);
+      setSelectedDate(targetDate);
+      setSelectedEvent(event);
+      return;
+    }
+
+    await fetchEvents(currentRangeRef.current);
   };
 
   const handleVoiceError = (message, details) => {
@@ -285,6 +387,24 @@ export default function App() {
     fetchEvents(normalized);
   };
 
+  const handleYearChange = (event) => {
+    const nextDate = dayjs(currentDate).year(Number(event.target.value)).toDate();
+    syncCalendarContext(currentView, nextDate);
+  };
+
+  const handleMonthChange = (event) => {
+    const nextDate = dayjs(currentDate).month(Number(event.target.value)).toDate();
+    syncCalendarContext(currentView, nextDate);
+  };
+
+  const handleViewChange = (view) => {
+    syncCalendarContext(view, currentDate);
+  };
+
+  const handleYearMonthCardClick = (monthDate) => {
+    syncCalendarContext("month", monthDate.toDate());
+  };
+
   const handleCreateEvent = async () => {
     if (!newEvent.title.trim() || !newEvent.start_time) {
       setStatusMessage({ type: "error", text: "请填写事件标题和开始时间" });
@@ -310,7 +430,7 @@ export default function App() {
         setSelectedEvent(createdEvent);
         setSelectedDate(new Date(createdEvent.start_time));
       }
-      await fetchEvents();
+      await fetchEvents(currentRangeRef.current);
     } catch (error) {
       setStatusMessage({ type: "error", text: getErrorMessage(error) });
     }
@@ -341,7 +461,7 @@ export default function App() {
         setSelectedEvent(updatedEvent);
         setSelectedDate(new Date(updatedEvent.start_time));
       }
-      await fetchEvents();
+      await fetchEvents(currentRangeRef.current);
     } catch (error) {
       setStatusMessage({ type: "error", text: getErrorMessage(error) });
     }
@@ -360,7 +480,7 @@ export default function App() {
       setHoveredEvent(null);
       addRecentAction(response.message || "事件已删除");
       speak(response.message);
-      await fetchEvents();
+      await fetchEvents(currentRangeRef.current);
     } catch (error) {
       setStatusMessage({ type: "error", text: getErrorMessage(error) });
     }
@@ -370,13 +490,13 @@ export default function App() {
     setActiveNav(itemId);
 
     if (itemId === "calendar") {
-      setCurrentView("month");
+      setPageMode("calendar");
       calendarSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
     if (itemId === "history") {
-      historySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setPageMode("history");
       return;
     }
 
@@ -400,7 +520,7 @@ export default function App() {
   const showDateList = !selectedEvent && selectedDateEvents.length > 0;
 
   return (
-    <div className="page-shell">
+    <div className={`page-shell${pageMode === "history" ? " history-mode" : ""}`}>
       <aside className="layout-sidebar">
         <div className="sidebar-brand">
           <span className="sidebar-brand-icon">☁️</span>
@@ -423,233 +543,219 @@ export default function App() {
             </button>
           ))}
         </nav>
-
-        <section className="sidebar-card" ref={historySectionRef}>
-          <div className="sidebar-card-header">
-            <h2>历史语音</h2>
-            <span>{voiceHistory.length} 条</span>
-          </div>
-          {voiceHistory.length > 0 ? (
-            <ul className="history-list">
-              {voiceHistory.map((item) => (
-                <li key={item.id}>
-                  <div className="history-meta">
-                    <span>{item.time}</span>
-                    <span>{item.action}</span>
-                  </div>
-                  <strong>{item.transcript}</strong>
-                  <p>{item.message}</p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="sidebar-empty">暂无历史语音记录</div>
-          )}
-        </section>
-
-        <section className="sidebar-card">
-          <div className="sidebar-card-header">
-            <h2>查询结果摘要</h2>
-            <span>{queryEvents.length} 项</span>
-          </div>
-          {queryEvents.length > 0 ? (
-            <ul className="summary-list">
-              {queryEvents.map((event) => (
-                <li key={`${event.id}-${event.start_time}`}>{formatHistoryLine(event)}</li>
-              ))}
-            </ul>
-          ) : (
-            <div className="sidebar-empty">最近一次语音查询还没有返回事件</div>
-          )}
-        </section>
-
-        <section className="sidebar-card recent-card">
-          <div className="sidebar-card-header">
-            <h2>最近操作</h2>
-          </div>
-          {recentActions.length > 0 ? (
-            <ul className="recent-list">
-              {recentActions.map((item) => (
-                <li key={item.id}>
-                  <span>{item.time}</span>
-                  <p>{item.text}</p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="sidebar-empty">暂无最近操作</div>
-          )}
-        </section>
       </aside>
 
       <main className="layout-main">
         <header className="topbar">
           <div className="topbar-left">
-            <h1>小云日历</h1>
-            <span>{currentViewHeading}</span>
+            <h1>{pageMode === "history" ? "历史记录" : "小云日历"}</h1>
+            <span>{pageMode === "history" ? "查看最近的语音记录与操作结果" : currentViewHeading}</span>
           </div>
 
-          <div className="topbar-center">
-            <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
-          </div>
+          {pageMode === "calendar" ? (
+            <>
+              <div className="topbar-center">
+                <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
+              </div>
 
-          <div className="topbar-right">
-            <button className="primary-button" onClick={() => setShowAddModal(true)} type="button">
-              + 新建事件
-            </button>
-            <div className="view-switcher">
-              {[
-                { key: "month", label: "月" },
-                { key: "week", label: "周" },
-                { key: "day", label: "日" },
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={currentView === item.key ? "is-active" : ""}
-                  onClick={() => setCurrentView(item.key)}
-                >
-                  {item.label}
+              <div className="topbar-right">
+                <button className="primary-button topbar-primary-button" onClick={() => setShowAddModal(true)} type="button">
+                  + 新建事件
                 </button>
-              ))}
-            </div>
-          </div>
+                <div className="date-switcher">
+                  <select value={currentYear} onChange={handleYearChange} aria-label="选择年份">
+                    {yearOptions.map((year) => (
+                      <option key={year} value={year}>
+                        {year}年
+                      </option>
+                    ))}
+                  </select>
+                  <select value={currentMonth} onChange={handleMonthChange} aria-label="选择月份">
+                    {MONTH_LABELS.map((label, index) => (
+                      <option key={label} value={index}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="view-switcher">
+                  {[
+                    { key: "year", label: "年" },
+                    { key: "month", label: "月" },
+                    { key: "week", label: "周" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={currentView === item.key ? "is-active" : ""}
+                      onClick={() => handleViewChange(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="topbar-spacer" />
+              <div className="topbar-spacer" />
+            </>
+          )}
         </header>
 
-        <div className={`status-strip status-${statusMessage.type}`}>
-          <span className="status-label">当前状态</span>
-          <span>{statusMessage.text}</span>
-        </div>
-
-        <section className="calendar-panel panel" ref={calendarSectionRef}>
-          <div className={`calendar-scroll calendar-scroll-${currentView}`}>
-              <Calendar
-                className="calendar-widget"
-                localizer={localizer}
-                events={events}
-                step={TIME_GRID_STEP_MINUTES}
-                timeslots={TIME_GRID_SLOTS_PER_GROUP}
-                formats={calendarFormats}
-                view={currentView}
-                date={currentDate}
-                onView={setCurrentView}
-              onNavigate={(date) => {
-                setCurrentDate(date);
-                setSelectedDate(date);
-              }}
-              style={{ height: currentView === "month" ? 640 : "100%" }}
-              onSelectEvent={handleSelectEvent}
-              onSelectSlot={handleSelectSlot}
-              selectable
-              onRangeChange={handleRangeChange}
-              tooltipAccessor={(event) => buildEventTooltip(event)}
-              components={{ event: CalendarEvent }}
-              toolbar={false}
-              messages={{
-                next: "下一段",
-                previous: "上一段",
-                today: "今天",
-                month: "月",
-                week: "周",
-                day: "日",
-                agenda: "列表",
-                noEventsInRange: "当前时间范围暂无事件",
-              }}
-            />
-          </div>
-        </section>
-      </main>
-
-      <aside className="layout-detail panel">
-        {showEmptyDetail ? (
-          <div className="empty-detail-state">
-            <h2>今日没有安排，好好休息</h2>
+        {pageMode === "calendar" ? (
+          <div className={`status-strip status-${statusMessage.type}`}>
+            <span className="status-label">当前状态</span>
+            <span>{statusMessage.text}</span>
           </div>
         ) : null}
 
-        {showDateList ? (
-          <section>
-            <div className="detail-header">
-              <h2>{dayjs(selectedDate).format("MM月DD日")}安排</h2>
-              <span>{selectedDateEvents.length} 项</span>
+        {pageMode === "calendar" ? (
+          <section className="calendar-panel panel" ref={calendarSectionRef}>
+            <div className={`calendar-scroll calendar-scroll-${currentView}`}>
+              {currentView === "year" ? (
+                <div className="year-grid">
+                  {yearViewMonths.map((month) => (
+                    <button
+                      key={month.monthIndex}
+                      type="button"
+                      className="year-card"
+                      onClick={() => handleYearMonthCardClick(month.monthDate)}
+                    >
+                      <div className="year-card-header">
+                        <strong>{month.monthLabel}</strong>
+                      </div>
+                      <div className="year-card-weekdays">
+                        {WEEKDAY_LABELS.map((label) => (
+                          <span key={label}>{label}</span>
+                        ))}
+                      </div>
+                      <div className="year-card-days">
+                        {month.cells.map((cell) => {
+                          const dateKey = cell.format("YYYY-MM-DD");
+                          const isCurrentMonth = cell.month() === month.monthIndex;
+                          const hasEvent = Boolean(yearEventCounts.get(dateKey));
+
+                          return (
+                            <div
+                              key={dateKey}
+                              className={`year-card-day${isCurrentMonth ? "" : " is-muted"}${hasEvent ? " has-event" : ""}`}
+                            >
+                              <span>{cell.date()}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <Calendar
+                  className="calendar-widget"
+                  localizer={localizer}
+                  events={events}
+                  step={TIME_GRID_STEP_MINUTES}
+                  timeslots={TIME_GRID_SLOTS_PER_GROUP}
+                  formats={calendarFormats}
+                  view={currentView}
+                  date={currentDate}
+                  onView={handleViewChange}
+                  onNavigate={(date) => syncCalendarContext(currentView, date)}
+                  style={{ height: currentView === "month" ? 640 : "100%" }}
+                  onSelectEvent={handleSelectEvent}
+                  onSelectSlot={handleSelectSlot}
+                  selectable
+                  onRangeChange={handleRangeChange}
+                  tooltipAccessor={(event) => buildEventTooltip(event)}
+                  components={{ event: CalendarEvent }}
+                  toolbar={false}
+                  messages={{
+                    next: "下一段",
+                    previous: "上一段",
+                    today: "今天",
+                    month: "月",
+                    week: "周",
+                    agenda: "列表",
+                    noEventsInRange: "当前时间范围暂无事件",
+                  }}
+                />
+              )}
             </div>
-            <ul className="today-list">
-              {selectedDateEvents.map((event) => (
-                <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
-                  <span className="today-dot" />
-                  <div>
-                    <strong>{event.title}</strong>
-                    <span>{dayjs(event.start).format("HH:mm")}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </section>
-        ) : null}
-
-        {selectedEvent ? (
-          <>
-            <section>
-              <div className="detail-header">
-                <h2>事件详情</h2>
-                <button
-                  className="ghost-button danger-button"
-                  onClick={handleDeleteSelected}
-                  type="button"
-                >
-                  删除事件
-                </button>
+        ) : (
+          <section className="history-main">
+            <section className="history-main-card panel">
+              <div className="history-main-header">
+                <h2>历史语音</h2>
+                <span>{voiceHistory.length} 条</span>
               </div>
-
-              <div className="detail-block">
-                <label>详情预览</label>
-                <pre className="code-surface detail-code">{formatEventDetail(focusEvent)}</pre>
-              </div>
-
-              <div className="detail-block">
-                <label>事件标题</label>
-                <input
-                  type="text"
-                  value={eventForm.title}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, title: event.target.value }))}
-                />
-              </div>
-
-              <div className="detail-block">
-                <label>开始时间</label>
-                <input
-                  type="datetime-local"
-                  value={eventForm.start_time}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, start_time: event.target.value }))}
-                />
-              </div>
-
-              <div className="detail-block">
-                <label>结束时间</label>
-                <input
-                  type="datetime-local"
-                  value={eventForm.end_time}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, end_time: event.target.value }))}
-                />
-              </div>
-
-              <div className="detail-block">
-                <label>备注</label>
-                <textarea
-                  value={eventForm.description}
-                  onChange={(event) => setEventForm((prev) => ({ ...prev, description: event.target.value }))}
-                  rows={4}
-                />
-              </div>
-
-              <div className="detail-actions">
-                <button className="primary-button" type="button" onClick={handleUpdateSelected}>
-                  保存修改
-                </button>
-              </div>
+              {voiceHistory.length > 0 ? (
+                <ul className="history-list">
+                  {voiceHistory.map((item) => (
+                    <li key={item.id}>
+                      <div className="history-meta">
+                        <span>{item.time}</span>
+                        <span>{item.action}</span>
+                      </div>
+                      <strong>{item.transcript}</strong>
+                      <p>{item.message}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="sidebar-empty">暂无历史语音记录</div>
+              )}
             </section>
 
-            <section className="today-panel">
+            <section className="history-main-card panel">
+              <div className="history-main-header">
+                <h2>查询结果摘要</h2>
+                <span>{queryEvents.length} 项</span>
+              </div>
+              {queryEvents.length > 0 ? (
+                <ul className="summary-list">
+                  {queryEvents.map((event) => (
+                    <li key={`${event.id}-${event.start_time}`}>{formatHistoryLine(event)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="sidebar-empty">最近一次语音查询还没有返回事件</div>
+              )}
+            </section>
+
+            <section className="history-main-card panel">
+              <div className="history-main-header">
+                <h2>最近操作</h2>
+                <span>{recentActions.length} 条</span>
+              </div>
+              {recentActions.length > 0 ? (
+                <ul className="recent-list">
+                  {recentActions.map((item) => (
+                    <li key={item.id}>
+                      <span>{item.time}</span>
+                      <p>{item.text}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="sidebar-empty">暂无最近操作</div>
+              )}
+            </section>
+          </section>
+        )}
+      </main>
+
+      {pageMode === "calendar" ? (
+        <aside className="layout-detail panel">
+          {showEmptyDetail ? (
+            <div className="empty-detail-state">
+              <h2>今日没有安排，好好休息</h2>
+            </div>
+          ) : null}
+
+          {showDateList ? (
+            <section>
               <div className="detail-header">
                 <h2>{dayjs(selectedDate).format("MM月DD日")}安排</h2>
                 <span>{selectedDateEvents.length} 项</span>
@@ -666,27 +772,105 @@ export default function App() {
                 ))}
               </ul>
             </section>
-          </>
-        ) : null}
+          ) : null}
 
-        {!showEmptyDetail ? (
-          <>
-            <section className="today-panel">
-              <div className="detail-header">
-                <h2>最近一次结构化意图</h2>
-              </div>
-              <pre className="code-surface">{formatIntent(lastIntent)}</pre>
-            </section>
+          {selectedEvent ? (
+            <>
+              <section>
+                <div className="detail-header">
+                  <h2>事件详情</h2>
+                  <button className="ghost-button danger-button" onClick={handleDeleteSelected} type="button">
+                    删除事件
+                  </button>
+                </div>
 
-            <section className="today-panel">
-              <div className="detail-header">
-                <h2>最近一次转写文本</h2>
-              </div>
-              <div className="detail-surface">{lastTranscript || "暂无"}</div>
-            </section>
-          </>
-        ) : null}
-      </aside>
+                <div className="detail-block">
+                  <label>详情预览</label>
+                  <pre className="code-surface detail-code">{formatEventDetail(focusEvent)}</pre>
+                </div>
+
+                <div className="detail-block">
+                  <label>事件标题</label>
+                  <input
+                    type="text"
+                    value={eventForm.title}
+                    onChange={(event) => setEventForm((prev) => ({ ...prev, title: event.target.value }))}
+                  />
+                </div>
+
+                <div className="detail-block">
+                  <label>开始时间</label>
+                  <input
+                    type="datetime-local"
+                    value={eventForm.start_time}
+                    onChange={(event) => setEventForm((prev) => ({ ...prev, start_time: event.target.value }))}
+                  />
+                </div>
+
+                <div className="detail-block">
+                  <label>结束时间</label>
+                  <input
+                    type="datetime-local"
+                    value={eventForm.end_time}
+                    onChange={(event) => setEventForm((prev) => ({ ...prev, end_time: event.target.value }))}
+                  />
+                </div>
+
+                <div className="detail-block">
+                  <label>备注</label>
+                  <textarea
+                    value={eventForm.description}
+                    onChange={(event) => setEventForm((prev) => ({ ...prev, description: event.target.value }))}
+                    rows={4}
+                  />
+                </div>
+
+                <div className="detail-actions">
+                  <button className="primary-button" type="button" onClick={handleUpdateSelected}>
+                    保存修改
+                  </button>
+                </div>
+              </section>
+
+              <section className="today-panel">
+                <div className="detail-header">
+                  <h2>{dayjs(selectedDate).format("MM月DD日")}安排</h2>
+                  <span>{selectedDateEvents.length} 项</span>
+                </div>
+                <ul className="today-list">
+                  {selectedDateEvents.map((event) => (
+                    <li key={event.id} onClick={() => setSelectedEvent(event.raw)}>
+                      <span className="today-dot" />
+                      <div>
+                        <strong>{event.title}</strong>
+                        <span>{dayjs(event.start).format("HH:mm")}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </>
+          ) : null}
+
+          {!showEmptyDetail ? (
+            <>
+              <section className="today-panel">
+                <div className="detail-header">
+                  <h2>最近一次结构化意图</h2>
+                </div>
+                <pre className="code-surface">{formatIntent(lastIntent)}</pre>
+              </section>
+
+              <section className="today-panel">
+                <div className="detail-header">
+                  <h2>最近一次转写文本</h2>
+                </div>
+                <div className="detail-surface">{lastTranscript || "暂无"}</div>
+              </section>
+            </>
+          ) : null}
+        </aside>
+      ) : null}
 
       {showAddModal ? (
         <div className="modal-overlay" onClick={() => setShowAddModal(false)} role="presentation">

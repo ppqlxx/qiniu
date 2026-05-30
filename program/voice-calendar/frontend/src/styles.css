@@ -1,6 +1,7 @@
 :root {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #0f172a;
+  --topbar-control-height: 42px;
   background:
     radial-gradient(circle at top left, rgba(186, 230, 253, 0.6), transparent 22%),
     linear-gradient(180deg, #f8fffe 0%, #eefbf7 100%);
@@ -14,6 +15,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: auto;
 }
 
 button,
@@ -38,6 +40,7 @@ button {
   grid-template-columns: 240px minmax(0, 1fr) 320px;
   gap: 20px;
   min-height: 100vh;
+  min-width: 1480px;
   padding: 20px;
 }
 
@@ -48,9 +51,13 @@ button {
 }
 
 .layout-sidebar {
+  position: sticky;
+  top: 20px;
   display: flex;
   flex-direction: column;
   gap: 18px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   padding: 22px 18px;
   border-radius: 30px;
   background: linear-gradient(180deg, #f5fffc 0%, #e9fbf5 100%);
@@ -112,18 +119,18 @@ button {
   transform: translateY(-1px);
 }
 
-.sidebar-card {
-  border-radius: 22px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid rgba(167, 243, 208, 0.9);
+.history-main {
+  display: grid;
+  gap: 18px;
+  min-height: 0;
 }
 
-.recent-card {
-  margin-top: auto;
+.history-main-card {
+  border-radius: 30px;
+  padding: 22px;
 }
 
-.sidebar-card-header,
+.history-main-header,
 .detail-header {
   display: flex;
   align-items: center;
@@ -132,14 +139,14 @@ button {
   margin-bottom: 12px;
 }
 
-.sidebar-card-header h2,
+.history-main-header h2,
 .detail-header h2 {
   margin: 0;
   font-size: 15px;
   color: #0f172a;
 }
 
-.sidebar-card-header span,
+.history-main-header span,
 .detail-header span {
   color: #0f766e;
   font-size: 12px;
@@ -216,9 +223,12 @@ button {
 }
 
 .layout-main {
+  position: sticky;
+  top: 20px;
   display: grid;
   grid-template-rows: auto auto 1fr;
   gap: 16px;
+  max-height: calc(100vh - 40px);
 }
 
 .topbar,
@@ -241,10 +251,17 @@ button {
   border-radius: 28px;
 }
 
+.topbar-left {
+  min-width: 0;
+}
+
 .topbar-left h1 {
   margin: 0 0 6px;
   font-size: 32px;
   color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar-left span {
@@ -262,6 +279,20 @@ button {
   justify-content: flex-end;
   align-items: center;
   gap: 12px;
+}
+
+.date-switcher {
+  display: flex;
+  gap: 8px;
+}
+
+.date-switcher select {
+  height: var(--topbar-control-height);
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #bfe9dc;
+  background: #ffffff;
+  color: #0f766e;
 }
 
 .primary-button,
@@ -284,6 +315,14 @@ button {
   padding: 10px 16px;
   border-radius: 999px;
   font-weight: 600;
+  min-height: var(--topbar-control-height);
+}
+
+.topbar-primary-button {
+  flex: 0 0 auto;
+  min-width: 126px;
+  height: var(--topbar-control-height);
+  white-space: nowrap;
 }
 
 .ghost-button {
@@ -302,6 +341,7 @@ button {
   display: flex;
   gap: 6px;
   padding: 4px;
+  min-height: var(--topbar-control-height);
   border-radius: 999px;
   background: #dff7ef;
 }
@@ -311,7 +351,7 @@ button {
   align-items: center;
   justify-content: center;
   min-width: 48px;
-  min-height: 38px;
+  height: calc(var(--topbar-control-height) - 8px);
   padding: 8px 14px;
   border-radius: 999px;
   background: transparent;
@@ -382,20 +422,77 @@ button {
   padding-right: 6px;
 }
 
-.calendar-scroll-week,
-.calendar-scroll-day {
+.calendar-scroll-week {
   overflow: hidden;
 }
 
+.calendar-scroll-year {
+  overflow: auto;
+}
+
 .calendar-scroll-week .calendar-widget,
-.calendar-scroll-day .calendar-widget,
-.calendar-scroll-week .rbc-time-view,
-.calendar-scroll-day .rbc-time-view {
+.calendar-scroll-week .rbc-time-view {
   height: 100%;
 }
 
 .calendar-widget {
   height: 100%;
+}
+
+.year-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.year-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid #d4f4ea;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(240, 253, 250, 0.88) 100%);
+  text-align: left;
+}
+
+.year-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0f172a;
+}
+
+.year-card-weekdays,
+.year-card-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.year-card-weekdays span {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.year-card-day {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 42px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.year-card-day.is-muted {
+  color: #cbd5e1;
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.year-card-day.has-event {
+  background: rgba(191, 219, 254, 0.35);
 }
 
 .calendar-widget .rbc-toolbar {
@@ -536,9 +633,13 @@ button {
 }
 
 .layout-detail {
+  position: sticky;
+  top: 20px;
   display: grid;
   align-content: start;
   gap: 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 
 .detail-block {
@@ -678,11 +779,6 @@ button {
   margin: 0;
 }
 
-.voice-modal-header p {
-  margin: 6px 0 0;
-  color: #64748b;
-}
-
 .voice-modal-body {
   display: grid;
   justify-items: center;
@@ -778,6 +874,36 @@ button {
   padding: 12px 14px;
 }
 
+.voice-confirm-block {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.07);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.voice-confirm-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-confirm-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #3730a3;
+  text-align: center;
+}
+
+.voice-confirm-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -797,27 +923,28 @@ button {
 
 @media (max-width: 1380px) {
   .page-shell {
-    grid-template-columns: 220px minmax(0, 1fr);
+    min-width: 1380px;
+    padding: 16px;
   }
 
+  .year-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .layout-sidebar,
+  .layout-main,
   .layout-detail {
-    grid-column: 1 / -1;
+    top: 16px;
+    max-height: calc(100vh - 32px);
   }
 }
 
 @media (max-width: 980px) {
   .page-shell {
-    grid-template-columns: 1fr;
-    padding: 16px;
+    min-width: 1280px;
   }
 
-  .topbar {
+  .year-grid {
     grid-template-columns: 1fr;
-    justify-items: start;
-  }
-
-  .topbar-center,
-  .topbar-right {
-    justify-content: flex-start;
   }
 }
