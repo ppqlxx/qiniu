@@ -1,102 +1,127 @@
+import base64
+import hashlib
+import hmac
 import os
+import subprocess
 import tempfile
+import time
+from email.utils import formatdate
 from pathlib import Path
-from urllib import request as urllib_request, error as urllib_error
 
-STT_PROVIDER = os.getenv("STT_PROVIDER", "funasr").lower()
-OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "whisper-1")
-FUNASR_HTTP_URL = os.getenv("FUNASR_HTTP_URL", "http://127.0.0.1:10095").rstrip("/")
+import requests as _req
 
-_openai_client = None
+STT_PROVIDER = os.getenv("STT_PROVIDER", "aliyun").lower()
+ALIYUN_ACCESS_KEY_ID = os.getenv("ALIYUN_ACCESS_KEY_ID", "")
+ALIYUN_ACCESS_KEY_SECRET = os.getenv("ALIYUN_ACCESS_KEY_SECRET", "")
+ALIYUN_NLS_APP_KEY = os.getenv("ALIYUN_NLS_APP_KEY", "")
+
+_nls_token_cache: dict = {"token": None, "expire": 0}
 
 
 def get_stt_provider():
-    """返回当前配置的语音识别 provider 名称。"""
     return STT_PROVIDER
 
 
-def _get_openai_client():
-    """延迟初始化 OpenAI 客户端，避免本地离线方案启动时强依赖该包。"""
-    global _openai_client
-    if _openai_client is None:
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise RuntimeError(
-                "未安装 openai 包，若要使用在线语音识别请先安装 requirements.txt 中的依赖"
-            ) from exc
-        _openai_client = OpenAI()
-    return _openai_client
-
-
-def _save_temp_audio(audio_file):
-    """将上传的音频文件保存为临时文件，供后续识别流程读取。"""
+def _save_temp_audio(audio_file) -> str:
     suffix = os.path.splitext(audio_file.filename or "")[-1] or ".webm"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         audio_file.save(tmp.name)
         return tmp.name
 
 
-def _transcribe_with_openai(audio_file):
-    """通过 OpenAI Whisper 接口完成语音转文字。"""
-    client = _get_openai_client()
+def _get_nls_token() -> str:
+    """获取阿里云 NLS Token，缓存有效期内直接复用（避免每次请求重新签名）。"""
+    global _nls_token_cache
+    now = time.time()
+    if _nls_token_cache["token"] and _nls_token_cache["expire"] > now + 60:
+        return _nls_token_cache["token"]
+
+    if not ALIYUN_ACCESS_KEY_ID or not ALIYUN_ACCESS_KEY_SECRET:
+        raise RuntimeError("未配置 ALIYUN_ACCESS_KEY_ID 或 ALIYUN_ACCESS_KEY_SECRET")
+
+    date = formatdate(usegmt=True)
+    path = "/pop/2018-05-18/tokens"
+    # NLS Meta 使用 ACS REST 签名：Method\nAccept\nContent-MD5\nContent-Type\nDate\nPath
+    string_to_sign = f"POST\napplication/json\n\napplication/json\n{date}\n{path}"
+    key = ALIYUN_ACCESS_KEY_SECRET.encode()
+    sig = base64.b64encode(hmac.new(key, string_to_sign.encode(), hashlib.sha1).digest()).decode()
+
+    resp = _req.post(
+        "https://nls-meta.cn-shanghai.aliyuncs.com" + path,
+        headers={
+            "Authorization": f"acs {ALIYUN_ACCESS_KEY_ID}:{sig}",
+            "Date": date,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        proxies={"http": None, "https": None},
+        timeout=10,
+    )
+    data = resp.json()
+    if "Token" not in data:
+        raise RuntimeError(f"NLS Token 获取失败: {data.get('Message', data)}")
+
+    _nls_token_cache["token"] = data["Token"]["Id"]
+    _nls_token_cache["expire"] = data["Token"]["ExpireTime"]
+    return _nls_token_cache["token"]
+
+
+def transcribe_audio(audio_file) -> str:
+    """通过阿里云 NLS 一句话识别 API 完成语音转文字。"""
+    if not ALIYUN_NLS_APP_KEY:
+        raise RuntimeError("未配置 ALIYUN_NLS_APP_KEY")
+
+    token = _get_nls_token()
     tmp_path = _save_temp_audio(audio_file)
+    wav_path = None
     try:
-        with open(tmp_path, "rb") as stream:
-            transcript = client.audio.transcriptions.create(
-                model=OPENAI_STT_MODEL,
-                file=stream,
-                language="zh",
+        suffix = Path(tmp_path).suffix.lstrip(".").lower() or "webm"
+
+        # NLS 不支持 webm/ogg 容器，用 ffmpeg 转成 16kHz 单声道 WAV
+        if suffix in ("webm", "ogg", "mp4"):
+            wav_path = tmp_path + ".wav"
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp_path, "-ar", "16000", "-ac", "1", wav_path],
+                capture_output=True, timeout=30,
             )
-        return transcript.text
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"音频转换失败: {result.stderr.decode(errors='replace')}")
+            send_path, fmt, sample_rate = wav_path, "wav", 16000
+        else:
+            send_path, fmt, sample_rate = tmp_path, suffix or "wav", 16000
 
-
-def _transcribe_with_funasr(audio_file):
-    """将音频转发到本地 FunASR HTTP 服务（asr-service）完成语音转文字。"""
-    import json
-    import uuid
-
-    tmp_path = _save_temp_audio(audio_file)
-    try:
-        boundary = uuid.uuid4().hex
-        filename = Path(tmp_path).name
-        with open(tmp_path, "rb") as f:
+        with open(send_path, "rb") as f:
             audio_data = f.read()
 
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="audio"; filename="{filename}"\r\n'
-            f"Content-Type: audio/webm\r\n\r\n"
-        ).encode() + audio_data + f"\r\n--{boundary}--\r\n".encode()
-
-        req = urllib_request.Request(
-            f"{FUNASR_HTTP_URL}/transcribe",
-            data=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-            method="POST",
+        resp = _req.post(
+            "https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/asr",
+            params={
+                "appkey": ALIYUN_NLS_APP_KEY,
+                "format": fmt,
+                "sample_rate": sample_rate,
+                "enable_punctuation_prediction": "true",
+                "enable_inverse_text_normalization": "true",
+            },
+            headers={
+                "X-NLS-Token": token,
+                "Content-Type": "application/octet-stream",
+            },
+            data=audio_data,
+            proxies={"http": None, "https": None},
+            timeout=30,
         )
-        try:
-            with urllib_request.urlopen(req, timeout=60) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-        except urllib_error.URLError as exc:
-            raise RuntimeError(
-                f"无法连接到 FunASR 服务，请确认 asr-service 正在运行（{FUNASR_HTTP_URL}）"
-            ) from exc
+        result = resp.json()
 
-        text = result.get("text", "").strip()
-        if not text:
-            raise RuntimeError("FunASR 服务未返回有效文本")
-        return text
+        if result.get("status") == 20000000:
+            text = (result.get("result") or "").strip()
+            if not text:
+                raise RuntimeError("阿里云 NLS 未识别到语音内容，请重试")
+            return text
+
+        raise RuntimeError(
+            f"阿里云 NLS 识别失败（code {result.get('status')}）: {result.get('message', '')}"
+        )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
-
-
-def transcribe_audio(audio_file):
-    """根据配置选择在线或本地语音识别方案。"""
-    if STT_PROVIDER == "openai":
-        return _transcribe_with_openai(audio_file)
-    if STT_PROVIDER == "funasr":
-        return _transcribe_with_funasr(audio_file)
-    raise RuntimeError(f"不支持的 STT_PROVIDER: {STT_PROVIDER}")
+        if wav_path:
+            Path(wav_path).unlink(missing_ok=True)
