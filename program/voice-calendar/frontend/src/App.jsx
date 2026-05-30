@@ -96,7 +96,7 @@ function formatViewHeading(view, date) {
     return dayjs(date).format("YYYY年");
   }
 
-  if (view === "week") {
+  if (view === "agenda") {
     const start = dayjs(date).startOf("week");
     const end = dayjs(date).endOf("week");
     return `${start.format("YYYY年MM月DD日")} - ${end.format("MM月DD日")}`;
@@ -115,7 +115,7 @@ function getRangeForCalendarView(view, date) {
     };
   }
 
-  if (view === "week") {
+  if (view === "agenda") {
     return {
       start: point.startOf("week").toDate(),
       end: point.endOf("week").toDate(),
@@ -140,6 +140,69 @@ function createYearMonthCells(monthDate) {
   }
 
   return cells;
+}
+
+function WeekAgendaTable({ events, currentDate, onSelectEvent }) {
+  const weekStart = dayjs(currentDate).startOf("week");
+  const today = dayjs();
+
+  const rows = Array.from({ length: 7 }, (_, i) => weekStart.add(i, "day")).flatMap((day) => {
+    const dateKey = day.format("YYYY-MM-DD");
+    const isToday = day.isSame(today, "day");
+    const dayEvents = events
+      .filter((e) => dayjs(e.start).isSame(day, "day"))
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+    if (dayEvents.length === 0) {
+      return [
+        <tr key={dateKey} className="week-agenda-row">
+          <td className={`week-agenda-date${isToday ? " is-today" : ""}`}>
+            <span className="week-agenda-day-num">{day.format("DD")}</span>
+            <span className="week-agenda-day-label">{WEEKDAY_LABELS[day.day()]}</span>
+          </td>
+          <td className="week-agenda-time" />
+          <td className="week-agenda-event week-agenda-empty">暂无事件</td>
+        </tr>,
+      ];
+    }
+
+    return dayEvents.map((event, idx) => (
+      <tr key={`${dateKey}-${idx}`} className="week-agenda-row">
+        {idx === 0 && (
+          <td
+            className={`week-agenda-date${isToday ? " is-today" : ""}`}
+            rowSpan={dayEvents.length}
+          >
+            <span className="week-agenda-day-num">{day.format("DD")}</span>
+            <span className="week-agenda-day-label">{WEEKDAY_LABELS[day.day()]}</span>
+          </td>
+        )}
+        <td className="week-agenda-time">{dayjs(event.start).format("HH:mm")}</td>
+        <td className="week-agenda-event">
+          <div className="agenda-event-inner" onClick={() => onSelectEvent(event)}>
+            <span className="agenda-event-dot" />
+            <span className="agenda-event-title">{event.title}</span>
+            {event.raw?.description && (
+              <span className="agenda-event-desc">— {event.raw.description}</span>
+            )}
+          </div>
+        </td>
+      </tr>
+    ));
+  });
+
+  return (
+    <table className="week-agenda-table">
+      <thead>
+        <tr>
+          <th className="week-agenda-th">日期</th>
+          <th className="week-agenda-th">时间</th>
+          <th className="week-agenda-th">事件</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+  );
 }
 
 export default function App() {
@@ -338,7 +401,7 @@ export default function App() {
     if (intent?.action === "query" && intent?.query_range?.start) {
       // 跳转到查询日期范围，切换到周视图方便查看事件时间
       const targetDate = new Date(intent.query_range.start);
-      syncCalendarContext("week", targetDate);
+      syncCalendarContext("agenda", targetDate);
       setSelectedDate(targetDate);
       // 有事件则选中第一条，右侧面板展示详情
       const firstEvent = result.data?.events?.[0];
@@ -350,7 +413,7 @@ export default function App() {
       // 跳转到新建事件所在日期并选中
       const event = result.data.event;
       const targetDate = new Date(event.start_time);
-      syncCalendarContext("week", targetDate);
+      syncCalendarContext("agenda", targetDate);
       setSelectedDate(targetDate);
       setSelectedEvent(event);
       return;
@@ -373,6 +436,9 @@ export default function App() {
   const handleSelectEvent = (event) => {
     setSelectedEvent(event.raw);
     setSelectedDate(new Date(event.start));
+    if (currentView !== "agenda") {
+      syncCalendarContext("agenda", new Date(event.start));
+    }
   };
 
   const handleSelectSlot = ({ start }) => {
@@ -579,7 +645,7 @@ export default function App() {
                   {[
                     { key: "year", label: "年" },
                     { key: "month", label: "月" },
-                    { key: "week", label: "周" },
+                    { key: "agenda", label: "周" },
                   ].map((item) => (
                     <button
                       key={item.key}
@@ -647,6 +713,12 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+              ) : currentView === "agenda" ? (
+                <WeekAgendaTable
+                  events={events}
+                  currentDate={currentDate}
+                  onSelectEvent={handleSelectEvent}
+                />
               ) : (
                 <Calendar
                   className="calendar-widget"
@@ -659,7 +731,7 @@ export default function App() {
                   date={currentDate}
                   onView={handleViewChange}
                   onNavigate={(date) => syncCalendarContext(currentView, date)}
-                  style={{ height: currentView === "month" ? 640 : "100%" }}
+                  style={{ height: 640 }}
                   onSelectEvent={handleSelectEvent}
                   onSelectSlot={handleSelectSlot}
                   selectable
@@ -673,7 +745,6 @@ export default function App() {
                     today: "今天",
                     month: "月",
                     week: "周",
-                    agenda: "列表",
                     noEventsInRange: "当前时间范围暂无事件",
                   }}
                 />
