@@ -96,7 +96,7 @@ function formatViewHeading(view, date) {
     return dayjs(date).format("YYYY年");
   }
 
-  if (view === "week" || view === "agenda") {
+  if (view === "agenda") {
     const start = dayjs(date).startOf("week");
     const end = dayjs(date).endOf("week");
     return `${start.format("YYYY年MM月DD日")} - ${end.format("MM月DD日")}`;
@@ -115,7 +115,7 @@ function getRangeForCalendarView(view, date) {
     };
   }
 
-  if (view === "week" || view === "agenda") {
+  if (view === "agenda") {
     return {
       start: point.startOf("week").toDate(),
       end: point.endOf("week").toDate(),
@@ -401,7 +401,7 @@ export default function App() {
     if (intent?.action === "query" && intent?.query_range?.start) {
       // 跳转到查询日期范围，切换到周视图方便查看事件时间
       const targetDate = new Date(intent.query_range.start);
-      syncCalendarContext("week", targetDate);
+      syncCalendarContext("agenda", targetDate);
       setSelectedDate(targetDate);
       // 有事件则选中第一条，右侧面板展示详情
       const firstEvent = result.data?.events?.[0];
@@ -413,7 +413,7 @@ export default function App() {
       // 跳转到新建事件所在日期并选中
       const event = result.data.event;
       const targetDate = new Date(event.start_time);
-      syncCalendarContext("week", targetDate);
+      syncCalendarContext("agenda", targetDate);
       setSelectedDate(targetDate);
       setSelectedEvent(event);
       return;
