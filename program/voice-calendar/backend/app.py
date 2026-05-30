@@ -1,14 +1,15 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from flask import Flask
 from flask_cors import CORS
-from dotenv import load_dotenv
 from database import init_db
 from llm import get_llm_provider
 from response import ok_response
 from routers.events import events_bp
 from routers.voice import voice_bp
 from stt import get_stt_provider
-
-load_dotenv()
 
 
 def create_app():
