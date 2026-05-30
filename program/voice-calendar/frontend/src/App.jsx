@@ -5,6 +5,7 @@ import "react-big-calendar/lib/css/react-big-calendar.css";
 
 import { createEvent, deleteEvent, getErrorMessage, getEvents } from "./api";
 import VoiceButton from "./components/VoiceButton";
+import { useWeather } from "./components/Weather";
 
 const localizer = dayjsLocalizer(dayjs);
 const TIME_GRID_STEP_MINUTES = 60;
@@ -183,7 +184,7 @@ function WeekAgendaTable({ events, currentDate, onSelectEvent }) {
             <span className="agenda-event-dot" />
             <span className="agenda-event-title">{event.title}</span>
             {event.raw?.description && (
-              <span className="agenda-event-desc">— {event.raw.description}</span>
+              <span className="agenda-event-desc">{event.raw.description}</span>
             )}
           </div>
         </td>
@@ -209,6 +210,7 @@ export default function App() {
   const currentRangeRef = useRef(null);
   const remindedEventKeysRef = useRef(new Set());
   const calendarSectionRef = useRef(null);
+  const { icon: weatherIcon, tempText } = useWeather();
 
   const [pageMode, setPageMode] = useState("calendar");
   const [activeNav, setActiveNav] = useState("calendar");
@@ -586,10 +588,10 @@ export default function App() {
     <div className={`page-shell${pageMode === "history" ? " history-mode" : ""}`}>
       <aside className="layout-sidebar">
         <div className="sidebar-brand">
-          <span className="sidebar-brand-icon">☁️</span>
+          <span className="sidebar-brand-icon">{weatherIcon}</span>
           <div>
-            <strong>小云</strong>
-            <span>日历</span>
+            <strong>小云日历</strong>
+            <span>{tempText}</span>
           </div>
         </div>
 
@@ -921,23 +923,6 @@ export default function App() {
             </>
           ) : null}
 
-          {selectedEvent ? (
-            <>
-              <section className="today-panel">
-                <div className="detail-header">
-                  <h2>最近一次结构化意图</h2>
-                </div>
-                <pre className="code-surface">{formatIntent(lastIntent)}</pre>
-              </section>
-
-              <section className="today-panel">
-                <div className="detail-header">
-                  <h2>最近一次转写文本</h2>
-                </div>
-                <div className="detail-surface">{lastTranscript || "暂无"}</div>
-              </section>
-            </>
-          ) : null}
         </aside>
       ) : null}
 
