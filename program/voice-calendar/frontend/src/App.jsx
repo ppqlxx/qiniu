@@ -548,23 +548,11 @@ export default function App() {
     setSelectedEvent(null);
   };
 
-  const handleNavAction = (itemId) => {
-    setActiveNav(itemId);
-
-    if (itemId === "calendar") {
-      setPageMode("calendar");
-      calendarSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-
-    if (itemId === "history") {
-      setPageMode("history");
-      return;
-    }
-
-    if (itemId === "settings") {
-      setStatusMessage({ type: "info", text: "设置面板将在后续版本中补充" });
-    }
+  const handleRangeChange = (nextRange) => {
+    const normalized = normalizeCalendarRange(nextRange);
+    if (!normalized) return;
+    currentRangeRef.current = normalized;
+    fetchEvents(normalized);
   };
 
   const handleYearChange = (event) => {
@@ -911,7 +899,6 @@ export default function App() {
                     today: "今天",
                     month: "月",
                     week: "周",
-                    agenda: "列表",
                     noEventsInRange: "当前时间范围暂无事件",
                   }}
                 />
