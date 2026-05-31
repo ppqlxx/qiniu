@@ -43,6 +43,10 @@ button {
   padding: 20px;
 }
 
+.page-shell.history-mode {
+  grid-template-columns: 2fr 10fr;
+}
+
 .layout-sidebar,
 .layout-main,
 .layout-detail {
@@ -349,6 +353,39 @@ button {
   border-radius: 999px;
   background: #f0fdfa;
   color: #0f766e;
+}
+
+.brief-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  height: var(--topbar-control-height);
+  font-size: 13px;
+  font-weight: 600;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.15), rgba(96, 165, 250, 0.15));
+  border: 1px solid rgba(45, 212, 191, 0.4);
+  color: #0f766e;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s, opacity 0.2s;
+}
+
+.brief-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.28), rgba(96, 165, 250, 0.28));
+  transform: translateY(-1px);
+}
+
+.brief-button:disabled,
+.brief-button.is-loading {
+  opacity: 0.65;
+  cursor: default;
+}
+
+[data-theme="dark"] .brief-button {
+  color: #2dd4bf;
+  border-color: rgba(45, 212, 191, 0.3);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.1), rgba(96, 165, 250, 0.1));
 }
 
 .danger-button {
@@ -1069,6 +1106,82 @@ button {
   gap: 12px;
 }
 
+.voice-import-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.voice-import-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.history-audio {
+  width: 100%;
+  margin-top: 6px;
+  height: 32px;
+}
+
+/* ── 活动统计 ── */
+.stats-period-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.stats-period-btn {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #d4f4ea;
+  background: transparent;
+  color: #0f766e;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.stats-period-btn.is-active {
+  background: linear-gradient(135deg, #2dd4bf 0%, #60a5fa 100%);
+  color: #fff;
+  border-color: transparent;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.stats-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(191, 219, 254, 0.8);
+}
+
+.stats-card-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.stats-card-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.stats-card-sub {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1107,4 +1220,372 @@ button {
   .year-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Settings Panel ─────────────────────────────── */
+
+.settings-main {
+  border-radius: 28px;
+  padding: 24px;
+}
+
+.settings-panel {
+  position: relative;
+  display: grid;
+  gap: 20px;
+}
+
+.settings-save-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 12px;
+  min-height: 18px;
+}
+
+.settings-saving {
+  color: #94a3b8;
+}
+
+.settings-saved {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.settings-section {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(191, 219, 254, 0.7);
+  padding: 18px 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.settings-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f766e;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.settings-label {
+  font-size: 13px;
+  color: #334155;
+  flex: 1;
+  min-width: 120px;
+}
+
+.settings-toggle-group {
+  display: flex;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(191, 219, 254, 0.9);
+}
+
+.settings-toggle-btn {
+  padding: 7px 16px;
+  font-size: 13px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-toggle-btn.is-active {
+  background: linear-gradient(135deg, #99f6e4, #bfdbfe);
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.settings-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-slider {
+  width: 120px;
+  accent-color: #2dd4bf;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.settings-slider-value {
+  font-size: 12px;
+  color: #475569;
+  min-width: 36px;
+  text-align: right;
+}
+
+.settings-select {
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fbfffe;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.settings-input {
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fbfffe;
+  color: #0f172a;
+  width: 160px;
+}
+
+/* Toggle switch */
+.settings-switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: #cbd5e1;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.settings-switch.is-on {
+  background: linear-gradient(135deg, #2dd4bf, #60a5fa);
+}
+
+.settings-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+.settings-switch.is-on .settings-switch-thumb {
+  left: 23px;
+}
+
+/* ── Dark Mode ──────────────────────────────────── */
+
+[data-theme="dark"] {
+  color: #e2e8f0;
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.35), transparent 22%),
+    linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea {
+  border-color: rgba(51, 65, 85, 0.8);
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .layout-sidebar {
+  background: linear-gradient(180deg, #1e293b 0%, #162032 100%);
+  border-color: rgba(45, 212, 191, 0.12);
+}
+
+[data-theme="dark"] .sidebar-brand strong,
+[data-theme="dark"] .sidebar-brand span:last-child {
+  color: #2dd4bf;
+}
+
+[data-theme="dark"] .sidebar-brand {
+  border-bottom-color: rgba(45, 212, 191, 0.2);
+}
+
+[data-theme="dark"] .sidebar-nav-item {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .sidebar-nav-item:hover,
+[data-theme="dark"] .sidebar-nav-item.is-active {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.2) 0%, rgba(96, 165, 250, 0.2) 100%);
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .topbar,
+[data-theme="dark"] .status-strip,
+[data-theme="dark"] .panel,
+[data-theme="dark"] .voice-modal,
+[data-theme="dark"] .create-modal {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(51, 65, 85, 0.8);
+}
+
+[data-theme="dark"] .topbar h1,
+[data-theme="dark"] .history-main-header h2,
+[data-theme="dark"] .detail-header h2 {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .history-list li,
+[data-theme="dark"] .summary-list li,
+[data-theme="dark"] .recent-list li {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(51, 65, 85, 0.7);
+}
+
+[data-theme="dark"] .history-main-header h2,
+[data-theme="dark"] .history-list strong {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .history-meta,
+[data-theme="dark"] .history-main-header span,
+[data-theme="dark"] .detail-header span {
+  color: #2dd4bf;
+}
+
+[data-theme="dark"] .history-list p,
+[data-theme="dark"] .recent-list span,
+[data-theme="dark"] .recent-list p {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .settings-section {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(51, 65, 85, 0.7);
+}
+
+[data-theme="dark"] .settings-section-title {
+  color: #2dd4bf;
+}
+
+[data-theme="dark"] .settings-label {
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .settings-toggle-group {
+  border-color: rgba(51, 65, 85, 0.8);
+}
+
+[data-theme="dark"] .settings-toggle-btn {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .settings-toggle-btn.is-active {
+  color: #0f172a;
+}
+
+[data-theme="dark"] .settings-select,
+[data-theme="dark"] .settings-input {
+  background: #1e293b;
+  border-color: rgba(51, 65, 85, 0.8);
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .code-surface {
+  background: rgba(15, 23, 42, 0.6);
+  color: #94a3b8;
+  border-color: rgba(51, 65, 85, 0.5);
+}
+
+[data-theme="dark"] .week-agenda-table {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .week-agenda-th {
+  background: rgba(15, 23, 42, 0.6);
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .week-agenda-row:hover {
+  background: rgba(45, 212, 191, 0.06);
+}
+
+[data-theme="dark"] .week-agenda-date {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .week-agenda-date.is-today .week-agenda-day-num {
+  background: linear-gradient(135deg, #2dd4bf, #60a5fa);
+  color: #0f172a;
+}
+
+[data-theme="dark"] .agenda-event-inner {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(45, 212, 191, 0.2);
+}
+
+[data-theme="dark"] .today-list li {
+  border-bottom-color: rgba(51, 65, 85, 0.5);
+}
+
+[data-theme="dark"] .voice-fab-tip {
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .year-card {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(51, 65, 85, 0.6);
+}
+
+[data-theme="dark"] .year-card-weekdays span {
+  color: #64748b;
+}
+
+[data-theme="dark"] .year-card-day {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .year-card-day.is-muted {
+  color: #475569;
+}
+
+[data-theme="dark"] .primary-button {
+  background: linear-gradient(135deg, #0d9488, #2563eb);
+}
+
+[data-theme="dark"] select {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: rgba(51, 65, 85, 0.8);
+}
+
+[data-theme="dark"] .view-switcher button {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .view-switcher button.is-active {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.25), rgba(96, 165, 250, 0.25));
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .date-nav-btn {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .empty-detail-hint {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .today-schedule-label {
+  color: #2dd4bf;
+}
+
+[data-theme="dark"] .today-schedule-empty {
+  color: #64748b;
 }

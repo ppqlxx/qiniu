@@ -30,6 +30,8 @@ export default function VoiceButton({ onResult, onError }) {
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
   const cancelledRef = useRef(false);
+  const audioFilenameRef = useRef(null);
+  const importInputRef = useRef(null);
 
   const isRecording = status === "recording";
   const isBusy = status === "processing" || status === "parsing" || status === "executing";
@@ -47,6 +49,7 @@ export default function VoiceButton({ onResult, onError }) {
 
   const openModal = () => {
     cancelledRef.current = false;
+    audioFilenameRef.current = null;
     setTranscriptPreview("");
     setPendingIntents([]);
     setPendingTranscript("");
@@ -68,6 +71,40 @@ export default function VoiceButton({ onResult, onError }) {
     setStatus("idle");
     setPendingIntents([]);
     setIsModalOpen(false);
+  };
+
+  // 转写完成后的共享流程：parse → confirm/execute
+  const processTranscript = async (transcript, audioFilename) => {
+    audioFilenameRef.current = audioFilename || null;
+    setTranscriptPreview(transcript);
+    setPendingTranscript(transcript);
+    setStatus("parsing");
+    try {
+      const parseResult = await parseVoiceIntent(transcript);
+      if (cancelledRef.current) return;
+      const intents = parseResult.data?.intents || [];
+
+      if (intents.length === 0) {
+        setStatus("done");
+        return;
+      }
+
+      if (!needsConfirm(intents)) {
+        setStatus("executing");
+        const result = await confirmVoiceIntent(intents, transcript, audioFilenameRef.current);
+        if (cancelledRef.current) return;
+        onResult?.(result);
+        setStatus("done");
+        return;
+      }
+
+      setPendingIntents(intents);
+      setStatus("confirming");
+    } catch (error) {
+      if (cancelledRef.current) return;
+      setStatus("error");
+      onError?.(getErrorMessage(error), error.response?.data?.data);
+    }
   };
 
   const startRecording = async () => {
@@ -94,45 +131,13 @@ export default function VoiceButton({ onResult, onError }) {
           return;
         }
 
-        // 第一步：STT，快速显示转写
         setStatus("processing");
-        let transcript = "";
         try {
           const sttResult = await transcribeAudio(blob);
           if (cancelledRef.current) return;
-          transcript = sttResult.data?.transcript || "";
-          setTranscriptPreview(transcript);
-          setPendingTranscript(transcript);
-        } catch (error) {
-          if (cancelledRef.current) return;
-          setStatus("error");
-          onError?.(getErrorMessage(error), error.response?.data?.data);
-          return;
-        }
-
-        // 第二步：LLM 解析意图列表
-        setStatus("parsing");
-        try {
-          const parseResult = await parseVoiceIntent(transcript);
-          if (cancelledRef.current) return;
-          const intents = parseResult.data?.intents || [];
-
-          if (intents.length === 0) {
-            setStatus("done");
-            return;
-          }
-
-          if (!needsConfirm(intents)) {
-            setStatus("executing");
-            const result = await confirmVoiceIntent(intents, transcript);
-            if (cancelledRef.current) return;
-            onResult?.(result);
-            setStatus("done");
-            return;
-          }
-
-          setPendingIntents(intents);
-          setStatus("confirming");
+          const transcript = sttResult.data?.transcript || "";
+          const audioFilename = sttResult.data?.audio_filename || null;
+          await processTranscript(transcript, audioFilename);
         } catch (error) {
           if (cancelledRef.current) return;
           setStatus("error");
@@ -161,7 +166,7 @@ export default function VoiceButton({ onResult, onError }) {
     if (!pendingIntents.length) return;
     setStatus("executing");
     try {
-      const result = await confirmVoiceIntent(pendingIntents, pendingTranscript);
+      const result = await confirmVoiceIntent(pendingIntents, pendingTranscript, audioFilenameRef.current);
       onResult?.(result);
       setStatus("done");
       setPendingIntents([]);
@@ -174,6 +179,38 @@ export default function VoiceButton({ onResult, onError }) {
   const handleCancel = () => {
     setPendingIntents([]);
     setStatus("idle");
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+
+    cancelledRef.current = false;
+    audioFilenameRef.current = null;
+    setTranscriptPreview("");
+    setPendingIntents([]);
+    setPendingTranscript("");
+    setIsModalOpen(true);
+
+    if (file.name.endsWith(".txt")) {
+      const text = (await file.text()).trim();
+      if (!text) return;
+      await processTranscript(text, null);
+    } else {
+      setStatus("processing");
+      try {
+        const sttResult = await transcribeAudio(file);
+        if (cancelledRef.current) return;
+        const transcript = sttResult.data?.transcript || "";
+        const audioFilename = sttResult.data?.audio_filename || null;
+        await processTranscript(transcript, audioFilename);
+      } catch (error) {
+        if (cancelledRef.current) return;
+        setStatus("error");
+        onError?.(getErrorMessage(error), error.response?.data?.data);
+      }
+    }
   };
 
   const helperText = (() => {
@@ -190,6 +227,13 @@ export default function VoiceButton({ onResult, onError }) {
 
   return (
     <>
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="audio/*,.txt"
+        style={{ display: "none" }}
+        onChange={handleImportFile}
+      />
       <button className="voice-trigger" onClick={openModal} type="button" aria-label="打开语音录入">
         <span className="voice-trigger-icon">🎤</span>
       </button>
@@ -257,6 +301,19 @@ export default function VoiceButton({ onResult, onError }) {
                           确认执行
                         </button>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {!isRecording && !isBusy && status !== "confirming" ? (
+                    <div className="voice-import-row">
+                      <button
+                        className="ghost-button voice-import-btn"
+                        type="button"
+                        onClick={() => importInputRef.current?.click()}
+                      >
+                        导入文件
+                      </button>
+                      <span className="voice-import-hint">支持音频或 .txt 文本</span>
                     </div>
                   ) : null}
                 </div>

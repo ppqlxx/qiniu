@@ -42,6 +42,24 @@ export const getVoiceLogs = (limit = 20) =>
 export const getVoiceAudioUrl = (filename) =>
   `${api.defaults.baseURL}/api/voice/audio/${filename}`;
 
+export const getActionLogs = (limit = 20) =>
+  api.get("/api/actions", { params: { limit } }).then(unwrap);
+
+export const logAction = (text) =>
+  api.post("/api/actions", { text }).then(unwrap);
+
+export const getBrief = (events, scope = "今日") =>
+  api.post("/api/brief", { events, scope }).then(unwrap);
+
+export const getStatistics = (period = "week") =>
+  api.get("/api/statistics", { params: { period } }).then(unwrap);
+
+export const getSettings = () =>
+  api.get("/api/settings").then(unwrap);
+
+export const updateSettings = (data) =>
+  api.put("/api/settings", data).then(unwrap);
+
 export const getErrorMessage = (error) =>
   error?.response?.data?.message ||
   error?.response?.data?.error ||

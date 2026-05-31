@@ -5,3 +5,8 @@ program/voice-calendar/frontend/frontend.out.log
 program/voice-calendar/frontend/frontend.err.log
 program/voice-calendar/frontend/frontend.dev.out.log
 program/voice-calendar/frontend/frontend.dev.err.log
+program/voice-calendar/backend/audio_store/
+program/voice-calendar/backend/instance/
+program/voice-calendar/backend/__pycache__/
+program/voice-calendar/backend/**/__pycache__/
+program/voice-calendar/backend/*.log
