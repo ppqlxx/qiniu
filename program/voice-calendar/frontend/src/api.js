@@ -30,11 +30,35 @@ export const transcribeAudio = (audioBlob) => {
 export const parseVoiceIntent = (transcript) =>
   api.post("/api/voice/parse", { transcript }).then(unwrap);
 
-export const confirmVoiceIntent = (intents, transcript) =>
-  api.post("/api/voice/confirm", { intents, transcript }).then(unwrap);
+export const confirmVoiceIntent = (intents, transcript, audioFilename) =>
+  api.post("/api/voice/confirm", { intents, transcript, audio_filename: audioFilename || null }).then(unwrap);
 
 export const executeVoiceIntent = (transcript) =>
   api.post("/api/voice/execute", { transcript }).then(unwrap);
+
+export const getVoiceLogs = (limit = 20) =>
+  api.get("/api/voice/logs", { params: { limit } }).then(unwrap);
+
+export const getVoiceAudioUrl = (filename) =>
+  `${api.defaults.baseURL}/api/voice/audio/${filename}`;
+
+export const getActionLogs = (limit = 20) =>
+  api.get("/api/actions", { params: { limit } }).then(unwrap);
+
+export const logAction = (text) =>
+  api.post("/api/actions", { text }).then(unwrap);
+
+export const getBrief = (events, scope = "今日") =>
+  api.post("/api/brief", { events, scope }).then(unwrap);
+
+export const getStatistics = (period = "week") =>
+  api.get("/api/statistics", { params: { period } }).then(unwrap);
+
+export const getSettings = () =>
+  api.get("/api/settings").then(unwrap);
+
+export const updateSettings = (data) =>
+  api.put("/api/settings", data).then(unwrap);
 
 export const getErrorMessage = (error) =>
   error?.response?.data?.message ||

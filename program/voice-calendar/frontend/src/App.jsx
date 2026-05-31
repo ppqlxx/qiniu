@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, dayjsLocalizer } from "react-big-calendar";
 import dayjs from "dayjs";
+import weekOfYear from "dayjs/plugin/weekOfYear";
 import "react-big-calendar/lib/css/react-big-calendar.css";
 
-import { createEvent, deleteEvent, getErrorMessage, getEvents } from "./api";
+dayjs.extend(weekOfYear);
+
+import { createEvent, deleteEvent, getActionLogs, getBrief, getErrorMessage, getEvents, getSettings, getStatistics, getVoiceAudioUrl, getVoiceLogs, logAction } from "./api";
+import SettingsPanel from "./components/SettingsPanel";
 import VoiceButton from "./components/VoiceButton";
+import { useWeather } from "./components/Weather";
 
 const localizer = dayjsLocalizer(dayjs);
 const TIME_GRID_STEP_MINUTES = 60;
@@ -44,11 +49,25 @@ function normalizeCalendarRange(range) {
   return null;
 }
 
-function speak(text) {
+function buildDayBrief(day, dayEvents) {
+  const dateLabel = dayjs(day).isSame(dayjs(), "day") ? "今天" : dayjs(day).format("MM月DD日");
+  if (dayEvents.length === 0) {
+    return `${dateLabel}没有任何安排，好好放松一下吧！`;
+  }
+  const items = dayEvents
+    .map((e) => `${dayjs(e.start).format("HH:mm")} ${e.title}`)
+    .join("，");
+  const encouragements = ["加油，你一定可以完成的！", "每一天都是新的开始！", "好好享受今天的每一刻！", "你很棒，继续保持！"];
+  return `${dateLabel}共有${dayEvents.length}项安排：${items}。${encouragements[dayjs(day).day() % encouragements.length]}`;
+}
+
+function speak(text, { rate = 1, volume = 1, lang = "zh-CN" } = {}) {
   if (!text || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "zh-CN";
+  utterance.lang = lang;
+  utterance.rate = rate;
+  utterance.volume = volume;
   window.speechSynthesis.speak(utterance);
 }
 
@@ -96,10 +115,10 @@ function formatViewHeading(view, date) {
     return dayjs(date).format("YYYY年");
   }
 
-  if (view === "week") {
-    const start = dayjs(date).startOf("week");
-    const end = dayjs(date).endOf("week");
-    return `${start.format("YYYY年MM月DD日")} - ${end.format("MM月DD日")}`;
+  if (view === "agenda") {
+    const d = dayjs(date);
+    const weekInMonth = Math.ceil((d.date() + d.startOf("month").day()) / 7);
+    return `${d.month() + 1}月第${weekInMonth}周`;
   }
 
   return dayjs(date).format("YYYY年MM月");
@@ -115,7 +134,7 @@ function getRangeForCalendarView(view, date) {
     };
   }
 
-  if (view === "week") {
+  if (view === "agenda") {
     return {
       start: point.startOf("week").toDate(),
       end: point.endOf("week").toDate(),
@@ -142,10 +161,96 @@ function createYearMonthCells(monthDate) {
   return cells;
 }
 
+function WeekAgendaTable({ events, currentDate, onSelectEvent, onDayClick }) {
+  const weekStart = dayjs(currentDate).startOf("week");
+  const today = dayjs();
+
+  const rows = Array.from({ length: 7 }, (_, i) => weekStart.add(i, "day")).flatMap((day) => {
+    const dateKey = day.format("YYYY-MM-DD");
+    const isToday = day.isSame(today, "day");
+    const dayEvents = events
+      .filter((e) => dayjs(e.start).isSame(day, "day"))
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+    const dateCell = (rowSpan) => (
+      <td
+        className={`week-agenda-date${isToday ? " is-today" : ""}${onDayClick ? " is-clickable" : ""}`}
+        rowSpan={rowSpan}
+        onClick={onDayClick ? () => onDayClick(day, dayEvents) : undefined}
+        title={onDayClick ? "点击播报当日事项" : undefined}
+      >
+        <span className="week-agenda-day-num">{day.format("DD")}</span>
+        <span className="week-agenda-day-label">{WEEKDAY_LABELS[day.day()]}</span>
+        {onDayClick ? <span className="week-agenda-speaker">🔊</span> : null}
+      </td>
+    );
+
+    if (dayEvents.length === 0) {
+      return [
+        <tr key={dateKey} className="week-agenda-row">
+          {dateCell(1)}
+          <td className="week-agenda-time" />
+          <td className="week-agenda-event week-agenda-empty">暂无事件</td>
+        </tr>,
+      ];
+    }
+
+    return dayEvents.map((event, idx) => (
+      <tr key={`${dateKey}-${idx}`} className="week-agenda-row">
+        {idx === 0 && dateCell(dayEvents.length)}
+        <td className="week-agenda-time">{dayjs(event.start).format("HH:mm")}</td>
+        <td className="week-agenda-event">
+          <div className="agenda-event-inner" onClick={() => onSelectEvent(event)}>
+            <span className="agenda-event-dot" />
+            <span className="agenda-event-title">{event.title}</span>
+            {event.raw?.description && (
+              <span className="agenda-event-desc">{event.raw.description}</span>
+            )}
+          </div>
+        </td>
+      </tr>
+    ));
+  });
+
+  return (
+    <table className="week-agenda-table">
+      <thead>
+        <tr>
+          <th className="week-agenda-th">日期</th>
+          <th className="week-agenda-th">时间</th>
+          <th className="week-agenda-th">事件</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+  );
+}
+
 export default function App() {
   const currentRangeRef = useRef(null);
   const remindedEventKeysRef = useRef(new Set());
   const calendarSectionRef = useRef(null);
+
+  const [settings, setSettings] = useState({
+    voice_language: "zh",
+    tts_rate: 1.0,
+    tts_volume: 1.0,
+    voice_reminder_enabled: true,
+    reminder_advance_seconds: 60,
+    browser_notification_enabled: false,
+    temperature_unit: "celsius",
+    city: "",
+    theme: "light",
+    voice_history_limit: 20,
+    action_history_limit: 20,
+  });
+  const [statsPeriod, setStatsPeriod] = useState("week");
+  const [statsData, setStatsData] = useState(null);
+
+  const { icon: weatherIcon, tempText } = useWeather({
+    temperatureUnit: settings.temperature_unit,
+    city: settings.city,
+  });
 
   const [pageMode, setPageMode] = useState("calendar");
   const [activeNav, setActiveNav] = useState("calendar");
@@ -165,6 +270,19 @@ export default function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showAddModal, setShowAddModal] = useState(false);
   const [newEvent, setNewEvent] = useState(createEmptyEventForm());
+  const [briefLoading, setBriefLoading] = useState(false);
+
+  useEffect(() => {
+    getSettings()
+      .then((res) => {
+        if (res.data) setSettings(res.data);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    document.body.dataset.theme = settings.theme;
+  }, [settings.theme]);
 
   const fetchEvents = useCallback(async (rangeOverride) => {
     setLoadingEvents(true);
@@ -200,6 +318,46 @@ export default function App() {
   }, [fetchEvents]);
 
   useEffect(() => {
+    getVoiceLogs(settings.voice_history_limit)
+      .then((res) => {
+        const logs = res.data?.logs ?? [];
+        setVoiceHistory(
+          logs.map((log) => ({
+            id: String(log.id),
+            time: dayjs(log.created_at).format("MM-DD HH:mm:ss"),
+            transcript: log.transcript || "暂无转写",
+            message: log.result_msg || "暂无结果",
+            action: log.action || "unknown",
+            audio_file: log.audio_file || null,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, [settings.voice_history_limit]);
+
+  useEffect(() => {
+    getActionLogs(settings.action_history_limit)
+      .then((res) => {
+        const logs = res.data?.logs ?? [];
+        setRecentActions(
+          logs.map((log) => ({
+            id: String(log.id),
+            time: dayjs(log.created_at).format("HH:mm:ss"),
+            text: log.text,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, [settings.action_history_limit]);
+
+  useEffect(() => {
+    if (pageMode !== "history") return;
+    getStatistics(statsPeriod)
+      .then((res) => setStatsData(res.data ?? null))
+      .catch(() => {});
+  }, [pageMode, statsPeriod]);
+
+  useEffect(() => {
     if (!selectedEvent) {
       setEventForm(createEmptyEventForm());
       return;
@@ -219,7 +377,8 @@ export default function App() {
       time: dayjs().format("HH:mm:ss"),
       text,
     };
-    setRecentActions((previous) => [action, ...previous].slice(0, 6));
+    setRecentActions((previous) => [action, ...previous].slice(0, 20));
+    logAction(text).catch(() => {});
   }, []);
 
   const checkReminders = useCallback(async () => {
@@ -230,24 +389,29 @@ export default function App() {
       });
       const items = response.data?.events ?? [];
       const now = dayjs();
+      const windowSeconds = settings.reminder_advance_seconds;
 
       for (const event of items) {
         const start = dayjs(event.start_time);
         const diffSeconds = now.diff(start, "second");
         const reminderKey = `${event.id}-${event.start_time}`;
 
-        if (diffSeconds >= 0 && diffSeconds < 60 && !remindedEventKeysRef.current.has(reminderKey)) {
+        if (diffSeconds >= 0 && diffSeconds < windowSeconds && !remindedEventKeysRef.current.has(reminderKey)) {
           remindedEventKeysRef.current.add(reminderKey);
           const message = `提醒您，现在有 ${event.title}`;
-          window.alert(message);
-          speak(message);
+          if (settings.browser_notification_enabled && Notification.permission === "granted") {
+            new Notification("小云日历提醒", { body: message });
+          } else {
+            window.alert(message);
+          }
+          if (settings.voice_reminder_enabled) speak(message, { rate: settings.tts_rate, volume: settings.tts_volume, lang: settings.voice_language === "en" ? "en-US" : "zh-CN" });
           addRecentAction(message);
         }
       }
     } catch {
       // 提醒轮询失败不打断主流程。
     }
-  }, [addRecentAction]);
+  }, [addRecentAction, settings.reminder_advance_seconds, settings.browser_notification_enabled, settings.voice_reminder_enabled]);
 
   useEffect(() => {
     checkReminders();
@@ -309,9 +473,10 @@ export default function App() {
       transcript: result.data?.transcript || result.intent?.raw_text || "暂无转写",
       message: result.message || "暂无结果说明",
       action: result.intent?.action || type,
+      audio_file: result.data?.audio_filename || null,
     };
 
-    setVoiceHistory((previous) => [entry, ...previous].slice(0, 8));
+    setVoiceHistory((previous) => [entry, ...previous].slice(0, 20));
     addRecentAction(result.message || "完成语音操作");
   }, [addRecentAction]);
 
@@ -331,14 +496,14 @@ export default function App() {
     setQueryEvents(result.data?.events || []);
     setStatusMessage({ type: "success", text: result.message || "操作成功" });
     recordVoiceHistory(result, "success");
-    speak(result.message);
+    speak(result.message, { rate: settings.tts_rate, volume: settings.tts_volume, lang: settings.voice_language === "en" ? "en-US" : "zh-CN" });
 
     const intent = result.intent;
 
     if (intent?.action === "query" && intent?.query_range?.start) {
       // 跳转到查询日期范围，切换到周视图方便查看事件时间
       const targetDate = new Date(intent.query_range.start);
-      syncCalendarContext("week", targetDate);
+      syncCalendarContext("agenda", targetDate);
       setSelectedDate(targetDate);
       // 有事件则选中第一条，右侧面板展示详情
       const firstEvent = result.data?.events?.[0];
@@ -350,7 +515,7 @@ export default function App() {
       // 跳转到新建事件所在日期并选中
       const event = result.data.event;
       const targetDate = new Date(event.start_time);
-      syncCalendarContext("week", targetDate);
+      syncCalendarContext("agenda", targetDate);
       setSelectedDate(targetDate);
       setSelectedEvent(event);
       return;
@@ -373,6 +538,9 @@ export default function App() {
   const handleSelectEvent = (event) => {
     setSelectedEvent(event.raw);
     setSelectedDate(new Date(event.start));
+    if (currentView !== "agenda") {
+      syncCalendarContext("agenda", new Date(event.start));
+    }
   };
 
   const handleSelectSlot = ({ start }) => {
@@ -380,11 +548,23 @@ export default function App() {
     setSelectedEvent(null);
   };
 
-  const handleRangeChange = (nextRange) => {
-    const normalized = normalizeCalendarRange(nextRange);
-    if (!normalized) return;
-    currentRangeRef.current = normalized;
-    fetchEvents(normalized);
+  const handleNavAction = (itemId) => {
+    setActiveNav(itemId);
+
+    if (itemId === "calendar") {
+      setPageMode("calendar");
+      calendarSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    if (itemId === "history") {
+      setPageMode("history");
+      return;
+    }
+
+    if (itemId === "settings") {
+      setStatusMessage({ type: "info", text: "设置面板将在后续版本中补充" });
+    }
   };
 
   const handleYearChange = (event) => {
@@ -479,7 +659,7 @@ export default function App() {
       setSelectedEvent(null);
       setHoveredEvent(null);
       addRecentAction(response.message || "事件已删除");
-      speak(response.message);
+      speak(response.message, { rate: settings.tts_rate, volume: settings.tts_volume, lang: settings.voice_language === "en" ? "en-US" : "zh-CN" });
       await fetchEvents(currentRangeRef.current);
     } catch (error) {
       setStatusMessage({ type: "error", text: getErrorMessage(error) });
@@ -501,7 +681,7 @@ export default function App() {
     }
 
     if (itemId === "settings") {
-      setStatusMessage({ type: "info", text: "设置面板将在后续版本中补充" });
+      setPageMode("settings");
     }
   };
 
@@ -516,14 +696,43 @@ export default function App() {
     </div>
   );
 
+  const handleSettingsChange = useCallback((next) => {
+    setSettings(next);
+  }, []);
+
+  const handleDayBriefPlay = useCallback(async (day, dayEvents) => {
+    if (!settings.voice_reminder_enabled || briefLoading) return;
+    setBriefLoading(true);
+    const ttsOpts = {
+      rate: settings.tts_rate,
+      volume: settings.tts_volume,
+      lang: settings.voice_language === "en" ? "en-US" : "zh-CN",
+    };
+    try {
+      const scope = dayjs(day).isSame(dayjs(), "day") ? "今日" : dayjs(day).format("MM月DD日");
+      const payload = dayEvents.map((e) => ({
+        title: e.title,
+        start_time: e.raw.start_time,
+        end_time: e.raw.end_time || null,
+        description: e.raw.description || "",
+      }));
+      const res = await getBrief(payload, scope);
+      speak(res.data?.text || buildDayBrief(day, dayEvents), ttsOpts);
+    } catch {
+      speak(buildDayBrief(day, dayEvents), ttsOpts);
+    } finally {
+      setBriefLoading(false);
+    }
+  }, [briefLoading, settings]);
+
   return (
-    <div className={`page-shell${pageMode === "history" ? " history-mode" : ""}`}>
+    <div className={`page-shell${pageMode === "history" || pageMode === "settings" ? " history-mode" : ""}`}>
       <aside className="layout-sidebar">
         <div className="sidebar-brand">
-          <span className="sidebar-brand-icon">☁️</span>
+          <span className="sidebar-brand-icon">{weatherIcon}</span>
           <div>
-            <strong>小云</strong>
-            <span>日历</span>
+            <strong>小云日历</strong>
+            <span>{tempText}</span>
           </div>
         </div>
 
@@ -545,16 +754,26 @@ export default function App() {
       <main className="layout-main">
         <header className="topbar">
           <div className="topbar-left">
-            <h1>{pageMode === "history" ? "历史记录" : "小云日历"}</h1>
-            <span>{pageMode === "history" ? "查看最近的语音记录与操作结果" : currentViewHeading}</span>
+            <h1>
+              {pageMode === "history" ? "历史记录" : pageMode === "settings" ? "设置" : "小云日历"}
+            </h1>
+            <div className="topbar-date-row">
+              {currentView === "agenda" && pageMode === "calendar" ? (
+                <button type="button" className="date-nav-btn" onClick={() => syncCalendarContext("agenda", dayjs(currentDate).subtract(1, "week").toDate())} aria-label="上一周">‹</button>
+              ) : null}
+              <span>
+                {pageMode === "history" ? "查看最近的语音记录与操作结果" :
+                 pageMode === "settings" ? "自定义应用行为与外观" :
+                 currentViewHeading}
+              </span>
+              {currentView === "agenda" && pageMode === "calendar" ? (
+                <button type="button" className="date-nav-btn" onClick={() => syncCalendarContext("agenda", dayjs(currentDate).add(1, "week").toDate())} aria-label="下一周">›</button>
+              ) : null}
+            </div>
           </div>
 
           {pageMode === "calendar" ? (
             <>
-              <div className="topbar-center">
-                <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
-              </div>
-
               <div className="topbar-right">
                 <button className="primary-button topbar-primary-button" onClick={() => setShowAddModal(true)} type="button">
                   + 新建事件
@@ -579,7 +798,7 @@ export default function App() {
                   {[
                     { key: "year", label: "年" },
                     { key: "month", label: "月" },
-                    { key: "week", label: "周" },
+                    { key: "agenda", label: "周" },
                   ].map((item) => (
                     <button
                       key={item.key}
@@ -606,6 +825,18 @@ export default function App() {
             <span className="status-label">当前状态</span>
             <span>{statusMessage.text}</span>
           </div>
+        ) : null}
+        {pageMode === "settings" ? (
+          <div className={`status-strip status-info`}>
+            <span className="status-label">提示</span>
+            <span>修改会立即保存到服务器</span>
+          </div>
+        ) : null}
+
+        {pageMode === "settings" ? (
+          <section className="settings-main panel">
+            <SettingsPanel settings={settings} onSettingsChange={handleSettingsChange} />
+          </section>
         ) : null}
 
         {pageMode === "calendar" ? (
@@ -647,6 +878,13 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+              ) : currentView === "agenda" ? (
+                <WeekAgendaTable
+                  events={events}
+                  currentDate={currentDate}
+                  onSelectEvent={handleSelectEvent}
+                  onDayClick={settings.voice_reminder_enabled ? handleDayBriefPlay : undefined}
+                />
               ) : (
                 <Calendar
                   className="calendar-widget"
@@ -659,7 +897,7 @@ export default function App() {
                   date={currentDate}
                   onView={handleViewChange}
                   onNavigate={(date) => syncCalendarContext(currentView, date)}
-                  style={{ height: currentView === "month" ? 640 : "100%" }}
+                  style={{ height: 640 }}
                   onSelectEvent={handleSelectEvent}
                   onSelectSlot={handleSelectSlot}
                   selectable
@@ -680,7 +918,7 @@ export default function App() {
               )}
             </div>
           </section>
-        ) : (
+        ) : pageMode === "history" ? (
           <section className="history-main">
             <section className="history-main-card panel">
               <div className="history-main-header">
@@ -693,31 +931,22 @@ export default function App() {
                     <li key={item.id}>
                       <div className="history-meta">
                         <span>{item.time}</span>
-                        <span>{item.action}</span>
                       </div>
                       <strong>{item.transcript}</strong>
                       <p>{item.message}</p>
+                      {item.audio_file ? (
+                        <audio
+                          className="history-audio"
+                          src={getVoiceAudioUrl(item.audio_file)}
+                          controls
+                          preload="none"
+                        />
+                      ) : null}
                     </li>
                   ))}
                 </ul>
               ) : (
                 <div className="sidebar-empty">暂无历史语音记录</div>
-              )}
-            </section>
-
-            <section className="history-main-card panel">
-              <div className="history-main-header">
-                <h2>查询结果摘要</h2>
-                <span>{queryEvents.length} 项</span>
-              </div>
-              {queryEvents.length > 0 ? (
-                <ul className="summary-list">
-                  {queryEvents.map((event) => (
-                    <li key={`${event.id}-${event.start_time}`}>{formatHistoryLine(event)}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="sidebar-empty">最近一次语音查询还没有返回事件</div>
               )}
             </section>
 
@@ -739,8 +968,98 @@ export default function App() {
                 <div className="sidebar-empty">暂无最近操作</div>
               )}
             </section>
+
+            {/* 活动统计 */}
+            <section className="history-main-card panel">
+              <div className="history-main-header">
+                <h2>活动统计</h2>
+                <div className="stats-period-tabs">
+                  {[["week", "本周"], ["month", "本月"], ["year", "本年"]].map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={`stats-period-btn${statsPeriod === val ? " is-active" : ""}`}
+                      onClick={() => setStatsPeriod(val)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {statsData ? (
+                <div className="stats-body">
+                  {/* 概览行 */}
+                  <div className="stats-grid">
+                    <div className="stats-card">
+                      <div className="stats-card-icon">📅</div>
+                      <div className="stats-card-body">
+                        <div className="stats-card-value">{statsData.events?.total ?? 0} 个事件</div>
+                        <div className="stats-card-sub">
+                          活跃 {statsData.events?.active_days ?? 0} 天
+                          {statsData.events?.busiest_day
+                            ? `　最忙 ${statsData.events.busiest_day.date.slice(5)}（${statsData.events.busiest_day.count} 个）`
+                            : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="stats-card">
+                      <div className="stats-card-icon">🎤</div>
+                      <div className="stats-card-body">
+                        <div className="stats-card-value">{statsData.voice_ops?.total ?? 0} 次语音</div>
+                        <div className="stats-card-sub">
+                          {[
+                            statsData.voice_ops?.by_action?.add && `添加 ${statsData.voice_ops.by_action.add}`,
+                            statsData.voice_ops?.by_action?.query && `查询 ${statsData.voice_ops.by_action.query}`,
+                            statsData.voice_ops?.by_action?.delete && `删除 ${statsData.voice_ops.by_action.delete}`,
+                          ].filter(Boolean).join("　") || "暂无操作"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 分类条形图 */}
+                  {(() => {
+                    const byCategory = statsData.events?.by_category ?? {};
+                    const entries = Object.entries(byCategory);
+                    const total = statsData.events?.total ?? 0;
+                    const COLOR_MAP = {
+                      工作: "#60a5fa",
+                      学习: "#34d399",
+                      休闲: "#f59e0b",
+                      社交: "#a78bfa",
+                      其他: "#94a3b8",
+                    };
+                    if (entries.length === 0) return (
+                      <div className="sidebar-empty" style={{ marginTop: 12 }}>暂无可分类事件</div>
+                    );
+                    return (
+                      <div className="stats-categories">
+                        <div className="stats-categories-title">事件分类</div>
+                        {entries.map(([cat, count]) => {
+                          const pct = total > 0 ? Math.round(count / total * 100) : 0;
+                          return (
+                            <div key={cat} className="stats-bar-row">
+                              <span className="stats-bar-label">{cat}</span>
+                              <div className="stats-bar-track">
+                                <div
+                                  className="stats-bar-fill"
+                                  style={{ width: `${pct}%`, background: COLOR_MAP[cat] ?? "#94a3b8" }}
+                                />
+                              </div>
+                              <span className="stats-bar-count">{count} 个 · {pct}%</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div className="sidebar-empty">加载中…</div>
+              )}
+            </section>
           </section>
-        )}
+        ) : null}
       </main>
 
       {pageMode === "calendar" ? (
@@ -752,9 +1071,13 @@ export default function App() {
               <p className="empty-detail-hint-sub">在这里查看详情或编辑</p>
 
               <div className="today-schedule">
-                <span className="today-schedule-label">今日安排</span>
+                <span className="today-schedule-label">
+                  {dayjs(selectedDate).isSame(dayjs(), "day") ? "今日安排" : `${dayjs(selectedDate).format("MM月DD日")}安排`}
+                </span>
                 {selectedDateEvents.length === 0 ? (
-                  <p className="today-schedule-empty">今天暂无事件</p>
+                  <p className="today-schedule-empty">
+                    {dayjs(selectedDate).isSame(dayjs(), "day") ? "今天暂无事件" : "当日暂无事件"}
+                  </p>
                 ) : (
                   <ul className="today-list">
                     {selectedDateEvents.map((event) => (
@@ -850,24 +1173,14 @@ export default function App() {
             </>
           ) : null}
 
-          {selectedEvent ? (
-            <>
-              <section className="today-panel">
-                <div className="detail-header">
-                  <h2>最近一次结构化意图</h2>
-                </div>
-                <pre className="code-surface">{formatIntent(lastIntent)}</pre>
-              </section>
-
-              <section className="today-panel">
-                <div className="detail-header">
-                  <h2>最近一次转写文本</h2>
-                </div>
-                <div className="detail-surface">{lastTranscript || "暂无"}</div>
-              </section>
-            </>
-          ) : null}
         </aside>
+      ) : null}
+
+      {pageMode === "calendar" ? (
+        <div className="voice-fab">
+          <span className="voice-fab-tip">点击我添加代办事项喔</span>
+          <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
+        </div>
       ) : null}
 
       {showAddModal ? (
