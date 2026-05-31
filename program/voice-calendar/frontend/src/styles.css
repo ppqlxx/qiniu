@@ -714,6 +714,28 @@ button {
   background: #ccfbf1 !important;
 }
 
+.week-agenda-date.is-clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.week-agenda-date.is-clickable:hover {
+  background: rgba(45, 212, 191, 0.2) !important;
+}
+
+.week-agenda-speaker {
+  display: block;
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.week-agenda-date.is-clickable:hover .week-agenda-speaker {
+  opacity: 1;
+}
+
 .week-agenda-day-num {
   display: block;
   font-size: 18px;
@@ -1180,6 +1202,57 @@ button {
   font-size: 11px;
   color: #64748b;
   line-height: 1.5;
+}
+
+.stats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stats-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stats-categories-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.stats-bar-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 72px;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-bar-label {
+  font-size: 12px;
+  color: #0f172a;
+  text-align: right;
+}
+
+.stats-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.stats-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.5s ease;
+}
+
+.stats-bar-count {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
 }
 
 .modal-actions {

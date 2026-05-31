@@ -49,6 +49,18 @@ function normalizeCalendarRange(range) {
   return null;
 }
 
+function buildDayBrief(day, dayEvents) {
+  const dateLabel = dayjs(day).isSame(dayjs(), "day") ? "今天" : dayjs(day).format("MM月DD日");
+  if (dayEvents.length === 0) {
+    return `${dateLabel}没有任何安排，好好放松一下吧！`;
+  }
+  const items = dayEvents
+    .map((e) => `${dayjs(e.start).format("HH:mm")} ${e.title}`)
+    .join("，");
+  const encouragements = ["加油，你一定可以完成的！", "每一天都是新的开始！", "好好享受今天的每一刻！", "你很棒，继续保持！"];
+  return `${dateLabel}共有${dayEvents.length}项安排：${items}。${encouragements[dayjs(day).day() % encouragements.length]}`;
+}
+
 function speak(text, { rate = 1, volume = 1, lang = "zh-CN" } = {}) {
   if (!text || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
@@ -149,7 +161,7 @@ function createYearMonthCells(monthDate) {
   return cells;
 }
 
-function WeekAgendaTable({ events, currentDate, onSelectEvent }) {
+function WeekAgendaTable({ events, currentDate, onSelectEvent, onDayClick }) {
   const weekStart = dayjs(currentDate).startOf("week");
   const today = dayjs();
 
@@ -160,13 +172,23 @@ function WeekAgendaTable({ events, currentDate, onSelectEvent }) {
       .filter((e) => dayjs(e.start).isSame(day, "day"))
       .sort((a, b) => new Date(a.start) - new Date(b.start));
 
+    const dateCell = (rowSpan) => (
+      <td
+        className={`week-agenda-date${isToday ? " is-today" : ""}${onDayClick ? " is-clickable" : ""}`}
+        rowSpan={rowSpan}
+        onClick={onDayClick ? () => onDayClick(day, dayEvents) : undefined}
+        title={onDayClick ? "点击播报当日事项" : undefined}
+      >
+        <span className="week-agenda-day-num">{day.format("DD")}</span>
+        <span className="week-agenda-day-label">{WEEKDAY_LABELS[day.day()]}</span>
+        {onDayClick ? <span className="week-agenda-speaker">🔊</span> : null}
+      </td>
+    );
+
     if (dayEvents.length === 0) {
       return [
         <tr key={dateKey} className="week-agenda-row">
-          <td className={`week-agenda-date${isToday ? " is-today" : ""}`}>
-            <span className="week-agenda-day-num">{day.format("DD")}</span>
-            <span className="week-agenda-day-label">{WEEKDAY_LABELS[day.day()]}</span>
-          </td>
+          {dateCell(1)}
           <td className="week-agenda-time" />
           <td className="week-agenda-event week-agenda-empty">暂无事件</td>
         </tr>,
@@ -175,15 +197,7 @@ function WeekAgendaTable({ events, currentDate, onSelectEvent }) {
 
     return dayEvents.map((event, idx) => (
       <tr key={`${dateKey}-${idx}`} className="week-agenda-row">
-        {idx === 0 && (
-          <td
-            className={`week-agenda-date${isToday ? " is-today" : ""}`}
-            rowSpan={dayEvents.length}
-          >
-            <span className="week-agenda-day-num">{day.format("DD")}</span>
-            <span className="week-agenda-day-label">{WEEKDAY_LABELS[day.day()]}</span>
-          </td>
-        )}
+        {idx === 0 && dateCell(dayEvents.length)}
         <td className="week-agenda-time">{dayjs(event.start).format("HH:mm")}</td>
         <td className="week-agenda-event">
           <div className="agenda-event-inner" onClick={() => onSelectEvent(event)}>
@@ -674,39 +688,30 @@ export default function App() {
     setSettings(next);
   }, []);
 
-  const handleBriefPlay = useCallback(async () => {
-    if (briefLoading) return;
+  const handleDayBriefPlay = useCallback(async (day, dayEvents) => {
+    if (!settings.voice_reminder_enabled || briefLoading) return;
     setBriefLoading(true);
+    const ttsOpts = {
+      rate: settings.tts_rate,
+      volume: settings.tts_volume,
+      lang: settings.voice_language === "en" ? "en-US" : "zh-CN",
+    };
     try {
-      const today = dayjs();
-      const weekStart = dayjs(currentDate).startOf("week");
-      const weekEnd = dayjs(currentDate).endOf("week");
-      const todayEvents = events.filter((e) => dayjs(e.start).isSame(today, "day"));
-      const scope = todayEvents.length > 0 ? "今日及本周" : "本周";
-      const payload = events
-        .filter((e) => {
-          const d = dayjs(e.start);
-          return d.isAfter(weekStart.subtract(1, "ms")) && d.isBefore(weekEnd.add(1, "ms"));
-        })
-        .map((e) => ({
-          title: e.title,
-          start_time: e.raw.start_time,
-          end_time: e.raw.end_time || null,
-          description: e.raw.description || "",
-        }));
+      const scope = dayjs(day).isSame(dayjs(), "day") ? "今日" : dayjs(day).format("MM月DD日");
+      const payload = dayEvents.map((e) => ({
+        title: e.title,
+        start_time: e.raw.start_time,
+        end_time: e.raw.end_time || null,
+        description: e.raw.description || "",
+      }));
       const res = await getBrief(payload, scope);
-      const text = res.data?.text || "暂无播报内容";
-      speak(text, {
-        rate: settings.tts_rate,
-        volume: settings.tts_volume,
-        lang: settings.voice_language === "en" ? "en-US" : "zh-CN",
-      });
+      speak(res.data?.text || buildDayBrief(day, dayEvents), ttsOpts);
     } catch {
-      speak("播报生成失败，请稍后重试", { rate: settings.tts_rate, volume: settings.tts_volume });
+      speak(buildDayBrief(day, dayEvents), ttsOpts);
     } finally {
       setBriefLoading(false);
     }
-  }, [briefLoading, events, currentDate, settings]);
+  }, [briefLoading, settings]);
 
   return (
     <div className={`page-shell${pageMode === "history" || pageMode === "settings" ? " history-mode" : ""}`}>
@@ -758,17 +763,6 @@ export default function App() {
           {pageMode === "calendar" ? (
             <>
               <div className="topbar-right">
-                {currentView === "agenda" ? (
-                  <button
-                    type="button"
-                    className={`brief-button${briefLoading ? " is-loading" : ""}`}
-                    onClick={handleBriefPlay}
-                    disabled={briefLoading}
-                    title="播报本周日程"
-                  >
-                    {briefLoading ? "生成中…" : "📢 播报"}
-                  </button>
-                ) : null}
                 <button className="primary-button topbar-primary-button" onClick={() => setShowAddModal(true)} type="button">
                   + 新建事件
                 </button>
@@ -877,6 +871,7 @@ export default function App() {
                   events={events}
                   currentDate={currentDate}
                   onSelectEvent={handleSelectEvent}
+                  onDayClick={settings.voice_reminder_enabled ? handleDayBriefPlay : undefined}
                 />
               ) : (
                 <Calendar
@@ -979,32 +974,72 @@ export default function App() {
                 </div>
               </div>
               {statsData ? (
-                <div className="stats-grid">
-                  <div className="stats-card">
-                    <div className="stats-card-icon">📅</div>
-                    <div className="stats-card-body">
-                      <div className="stats-card-value">{statsData.events?.total ?? 0} 个事件</div>
-                      <div className="stats-card-sub">
-                        活跃 {statsData.events?.active_days ?? 0} 天
-                        {statsData.events?.busiest_day
-                          ? `　最忙 ${statsData.events.busiest_day.date.slice(5)}（${statsData.events.busiest_day.count} 个）`
-                          : ""}
+                <div className="stats-body">
+                  {/* 概览行 */}
+                  <div className="stats-grid">
+                    <div className="stats-card">
+                      <div className="stats-card-icon">📅</div>
+                      <div className="stats-card-body">
+                        <div className="stats-card-value">{statsData.events?.total ?? 0} 个事件</div>
+                        <div className="stats-card-sub">
+                          活跃 {statsData.events?.active_days ?? 0} 天
+                          {statsData.events?.busiest_day
+                            ? `　最忙 ${statsData.events.busiest_day.date.slice(5)}（${statsData.events.busiest_day.count} 个）`
+                            : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="stats-card">
+                      <div className="stats-card-icon">🎤</div>
+                      <div className="stats-card-body">
+                        <div className="stats-card-value">{statsData.voice_ops?.total ?? 0} 次语音</div>
+                        <div className="stats-card-sub">
+                          {[
+                            statsData.voice_ops?.by_action?.add && `添加 ${statsData.voice_ops.by_action.add}`,
+                            statsData.voice_ops?.by_action?.query && `查询 ${statsData.voice_ops.by_action.query}`,
+                            statsData.voice_ops?.by_action?.delete && `删除 ${statsData.voice_ops.by_action.delete}`,
+                          ].filter(Boolean).join("　") || "暂无操作"}
+                        </div>
                       </div>
                     </div>
                   </div>
-                  <div className="stats-card">
-                    <div className="stats-card-icon">🎤</div>
-                    <div className="stats-card-body">
-                      <div className="stats-card-value">{statsData.voice_ops?.total ?? 0} 次语音</div>
-                      <div className="stats-card-sub">
-                        {[
-                          statsData.voice_ops?.by_action?.add && `添加 ${statsData.voice_ops.by_action.add}`,
-                          statsData.voice_ops?.by_action?.query && `查询 ${statsData.voice_ops.by_action.query}`,
-                          statsData.voice_ops?.by_action?.delete && `删除 ${statsData.voice_ops.by_action.delete}`,
-                        ].filter(Boolean).join("　") || "暂无操作"}
+
+                  {/* 分类条形图 */}
+                  {(() => {
+                    const byCategory = statsData.events?.by_category ?? {};
+                    const entries = Object.entries(byCategory);
+                    const total = statsData.events?.total ?? 0;
+                    const COLOR_MAP = {
+                      工作: "#60a5fa",
+                      学习: "#34d399",
+                      休闲: "#f59e0b",
+                      社交: "#a78bfa",
+                      其他: "#94a3b8",
+                    };
+                    if (entries.length === 0) return (
+                      <div className="sidebar-empty" style={{ marginTop: 12 }}>暂无可分类事件</div>
+                    );
+                    return (
+                      <div className="stats-categories">
+                        <div className="stats-categories-title">事件分类</div>
+                        {entries.map(([cat, count]) => {
+                          const pct = total > 0 ? Math.round(count / total * 100) : 0;
+                          return (
+                            <div key={cat} className="stats-bar-row">
+                              <span className="stats-bar-label">{cat}</span>
+                              <div className="stats-bar-track">
+                                <div
+                                  className="stats-bar-fill"
+                                  style={{ width: `${pct}%`, background: COLOR_MAP[cat] ?? "#94a3b8" }}
+                                />
+                              </div>
+                              <span className="stats-bar-count">{count} 个 · {pct}%</span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="sidebar-empty">加载中…</div>
