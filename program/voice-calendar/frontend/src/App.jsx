@@ -739,7 +739,7 @@ export default function App() {
         </nav>
       </aside>
 
-      <main className="layout-main">
+      <main className={`layout-main${pageMode === "history" || pageMode === "settings" ? " layout-main--history" : ""}`}>
         <header className="topbar">
           <div className="topbar-left">
             <h1>
@@ -1022,18 +1022,36 @@ export default function App() {
                     return (
                       <div className="stats-categories">
                         <div className="stats-categories-title">事件分类</div>
-                        {entries.map(([cat, count]) => {
-                          const pct = total > 0 ? Math.round(count / total * 100) : 0;
+                        {entries.map(([cat, catData]) => {
+                          const catCount = typeof catData === "object" ? (catData.count ?? 0) : Number(catData);
+                          const catEvents = typeof catData === "object" ? (catData.events ?? []) : [];
+                          const catPct = total > 0 ? Math.round(catCount / total * 100) : 0;
+                          const catColor = COLOR_MAP[cat] ?? "#94a3b8";
                           return (
-                            <div key={cat} className="stats-bar-row">
+                            <div key={cat} className="stats-bar-row stats-bar-row--hoverable">
                               <span className="stats-bar-label">{cat}</span>
                               <div className="stats-bar-track">
                                 <div
                                   className="stats-bar-fill"
-                                  style={{ width: `${pct}%`, background: COLOR_MAP[cat] ?? "#94a3b8" }}
+                                  style={{ width: `${catPct}%`, background: catColor }}
                                 />
                               </div>
-                              <span className="stats-bar-count">{count} 个 · {pct}%</span>
+                              <span className="stats-bar-count">{catCount} 个 · {catPct}%</span>
+                              {catEvents.length > 0 && (
+                                <div className="stats-tooltip" style={{ "--cat-color": catColor }}>
+                                  <div className="stats-tooltip-title" style={{ color: catColor }}>
+                                    {cat}（{catCount} 个）
+                                  </div>
+                                  <ul className="stats-tooltip-list">
+                                    {catEvents.map((ev, i) => (
+                                      <li key={i}>
+                                        <span className="stats-tooltip-date">{ev.date} {ev.time}</span>
+                                        <span className="stats-tooltip-name">{ev.title}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
