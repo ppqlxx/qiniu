@@ -53,6 +53,8 @@ SYSTEM_PROMPT = """你是一个智能日历助手，擅长从口语化描述中�
 - "取消明天的组会" → intents=[{{delete, 组会}}]
 - "今天有什么安排" → intents=[{{query, query_range=today}}]
 - "今天天气怎么样" → intents=[]
+- "我昨天已经吃完西瓜了" → intents=[{{delete, 吃西瓜, 昨天}}]（"已经做完/吃完/完成了"均视为 delete）
+- "刚才的会议结束了" → intents=[{{delete, 会议, 当前时间附近}}]
 """
 
 
