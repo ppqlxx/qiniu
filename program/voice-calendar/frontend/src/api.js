@@ -30,11 +30,17 @@ export const transcribeAudio = (audioBlob) => {
 export const parseVoiceIntent = (transcript) =>
   api.post("/api/voice/parse", { transcript }).then(unwrap);
 
-export const confirmVoiceIntent = (intents, transcript) =>
-  api.post("/api/voice/confirm", { intents, transcript }).then(unwrap);
+export const confirmVoiceIntent = (intents, transcript, audioFilename) =>
+  api.post("/api/voice/confirm", { intents, transcript, audio_filename: audioFilename || null }).then(unwrap);
 
 export const executeVoiceIntent = (transcript) =>
   api.post("/api/voice/execute", { transcript }).then(unwrap);
+
+export const getVoiceLogs = (limit = 20) =>
+  api.get("/api/voice/logs", { params: { limit } }).then(unwrap);
+
+export const getVoiceAudioUrl = (filename) =>
+  `${api.defaults.baseURL}/api/voice/audio/${filename}`;
 
 export const getErrorMessage = (error) =>
   error?.response?.data?.message ||

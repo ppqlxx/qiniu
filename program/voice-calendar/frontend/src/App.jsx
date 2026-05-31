@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, dayjsLocalizer } from "react-big-calendar";
 import dayjs from "dayjs";
+import weekOfYear from "dayjs/plugin/weekOfYear";
 import "react-big-calendar/lib/css/react-big-calendar.css";
+
+dayjs.extend(weekOfYear);
 
 import { createEvent, deleteEvent, getErrorMessage, getEvents } from "./api";
 import VoiceButton from "./components/VoiceButton";
@@ -98,9 +101,9 @@ function formatViewHeading(view, date) {
   }
 
   if (view === "agenda") {
-    const start = dayjs(date).startOf("week");
-    const end = dayjs(date).endOf("week");
-    return `${start.format("YYYY年MM月DD日")} - ${end.format("MM月DD日")}`;
+    const d = dayjs(date);
+    const weekInMonth = Math.ceil((d.date() + d.startOf("month").day()) / 7);
+    return `${d.month() + 1}月第${weekInMonth}周`;
   }
 
   return dayjs(date).format("YYYY年MM月");
@@ -614,7 +617,15 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-left">
             <h1>{pageMode === "history" ? "历史记录" : "小云日历"}</h1>
-            <span>{pageMode === "history" ? "查看最近的语音记录与操作结果" : currentViewHeading}</span>
+            <div className="topbar-date-row">
+              {currentView === "agenda" && pageMode === "calendar" ? (
+                <button type="button" className="date-nav-btn" onClick={() => syncCalendarContext("agenda", dayjs(currentDate).subtract(1, "week").toDate())} aria-label="上一周">‹</button>
+              ) : null}
+              <span>{pageMode === "history" ? "查看最近的语音记录与操作结果" : currentViewHeading}</span>
+              {currentView === "agenda" && pageMode === "calendar" ? (
+                <button type="button" className="date-nav-btn" onClick={() => syncCalendarContext("agenda", dayjs(currentDate).add(1, "week").toDate())} aria-label="下一周">›</button>
+              ) : null}
+            </div>
           </div>
 
           {pageMode === "calendar" ? (
@@ -623,26 +634,6 @@ export default function App() {
                 <button className="primary-button topbar-primary-button" onClick={() => setShowAddModal(true)} type="button">
                   + 新建事件
                 </button>
-                {currentView === "agenda" ? (
-                  <div className="week-nav">
-                    <button
-                      type="button"
-                      className="week-nav-btn"
-                      onClick={() => syncCalendarContext("agenda", dayjs(currentDate).subtract(1, "week").toDate())}
-                      aria-label="上一周"
-                    >
-                      ‹
-                    </button>
-                    <button
-                      type="button"
-                      className="week-nav-btn"
-                      onClick={() => syncCalendarContext("agenda", dayjs(currentDate).add(1, "week").toDate())}
-                      aria-label="下一周"
-                    >
-                      ›
-                    </button>
-                  </div>
-                ) : null}
                 <div className="date-switcher">
                   <select value={currentYear} onChange={handleYearChange} aria-label="选择年份">
                     {yearOptions.map((year) => (
@@ -841,9 +832,13 @@ export default function App() {
               <p className="empty-detail-hint-sub">在这里查看详情或编辑</p>
 
               <div className="today-schedule">
-                <span className="today-schedule-label">今日安排</span>
+                <span className="today-schedule-label">
+                  {dayjs(selectedDate).isSame(dayjs(), "day") ? "今日安排" : `${dayjs(selectedDate).format("MM月DD日")}安排`}
+                </span>
                 {selectedDateEvents.length === 0 ? (
-                  <p className="today-schedule-empty">今天暂无事件</p>
+                  <p className="today-schedule-empty">
+                    {dayjs(selectedDate).isSame(dayjs(), "day") ? "今天暂无事件" : "当日暂无事件"}
+                  </p>
                 ) : (
                   <ul className="today-list">
                     {selectedDateEvents.map((event) => (
