@@ -131,7 +131,9 @@ export default function VoiceButton({ onResult, onError }) {
           return;
         }
 
+        // 第一步：STT，快速显示转写
         setStatus("processing");
+        let transcript = "";
         try {
           const sttResult = await transcribeAudio(blob);
           if (cancelledRef.current) return;

@@ -115,6 +115,41 @@ def _get_qwen_client():
     return _qwen_client
 
 
+BRIEF_PROMPT = """你是小云日历的贴心助手，语气温暖、口语化，像朋友一样说话。
+当前时间：{now}
+
+用户请求播报{scope}的日程安排，事件如下：
+{events_text}
+
+请生成一段不超过 120 字的中文播报：
+1. 先说共有几项安排（没有则说"暂无安排"）
+2. 按时间顺序简要列举主要事项（时间+名称）
+3. 结尾给一句温暖的鼓励或安慰（比如：今天很充实，加油！/ 好好休息，明天继续~）
+
+只输出播报文本，不要任何标题或格式符号。"""
+
+
+def generate_brief(events: list, scope: str = "今日") -> str:
+    """调用 LLM 为指定事件列表生成一段温暖的日程播报文本。"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    if events:
+        lines = [f"- {e.get('start_time', '')[:16].replace('T', ' ')} {e.get('title', '')}" for e in events]
+        events_text = "\n".join(lines)
+    else:
+        events_text = "（暂无事件）"
+
+    try:
+        client = _get_qwen_client()
+        response = client.chat.completions.create(
+            model=QWEN_MODEL,
+            messages=[{"role": "user", "content": BRIEF_PROMPT.format(now=now, scope=scope, events_text=events_text)}],
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        raise RuntimeError(f"LLM 生成播报失败: {str(exc)}")
+
+
 def parse_voice_intent(text: str) -> list:
     """调用 Qwen 解析语音文本，返回标准化意图列表（支持多事件）。"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")

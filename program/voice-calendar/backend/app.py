@@ -8,8 +8,10 @@ from database import init_db
 from llm import get_llm_provider
 from response import ok_response
 from routers.actions import actions_bp
+from routers.brief import brief_bp
 from routers.events import events_bp
 from routers.settings import settings_bp
+from routers.statistics import statistics_bp
 from routers.voice import voice_bp
 from stt import get_stt_provider
 
@@ -22,8 +24,10 @@ def create_app():
 
     init_db(app)
     app.register_blueprint(actions_bp)
+    app.register_blueprint(brief_bp)
     app.register_blueprint(events_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(statistics_bp)
     app.register_blueprint(voice_bp)
 
     @app.get("/api/health")
