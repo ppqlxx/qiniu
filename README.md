@@ -3,7 +3,7 @@
 > 七牛云 × XEngineer 暑期实训营参赛作品
 
 **在线访问：** https://caviar-unjustly-hunting.ngrok-free.dev
-** 录屏demo: ** https://www.bilibili.com/video/BV1x6VU67ExD/
+录屏demo:  https://www.bilibili.com/video/BV1x6VU67ExD/
 > 注意：需要保持本地服务运行，访问时浏览器可能提示 ngrok 跳转页，点击 "Visit Site" 即可进入。
 
 一款基于语音交互的智能日历应用。用户通过麦克风说出自然语言指令（如"明天下午三点开组会"），系统自动识别意图并完成日程的增删查，同时支持日程播报、天气查询、历史记录等功能。
