@@ -35,6 +35,21 @@ class AppSettings(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ActionLog(db.Model):
+    __tablename__ = "action_logs"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    text       = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "text": self.text,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
 class VoiceLog(db.Model):
     __tablename__ = "voice_logs"
 
