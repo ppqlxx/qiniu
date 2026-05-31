@@ -619,14 +619,30 @@ export default function App() {
 
           {pageMode === "calendar" ? (
             <>
-              <div className="topbar-center">
-                <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
-              </div>
-
               <div className="topbar-right">
                 <button className="primary-button topbar-primary-button" onClick={() => setShowAddModal(true)} type="button">
                   + 新建事件
                 </button>
+                {currentView === "agenda" ? (
+                  <div className="week-nav">
+                    <button
+                      type="button"
+                      className="week-nav-btn"
+                      onClick={() => syncCalendarContext("agenda", dayjs(currentDate).subtract(1, "week").toDate())}
+                      aria-label="上一周"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      className="week-nav-btn"
+                      onClick={() => syncCalendarContext("agenda", dayjs(currentDate).add(1, "week").toDate())}
+                      aria-label="下一周"
+                    >
+                      ›
+                    </button>
+                  </div>
+                ) : null}
                 <div className="date-switcher">
                   <select value={currentYear} onChange={handleYearChange} aria-label="选择年份">
                     {yearOptions.map((year) => (
@@ -925,6 +941,11 @@ export default function App() {
 
         </aside>
       ) : null}
+
+      <div className="voice-fab">
+        <span className="voice-fab-tip">点击我添加代办事项喔</span>
+        <VoiceButton onResult={handleVoiceResult} onError={handleVoiceError} />
+      </div>
 
       {showAddModal ? (
         <div className="modal-overlay" onClick={() => setShowAddModal(false)} role="presentation">
