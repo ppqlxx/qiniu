@@ -104,11 +104,11 @@ def _get_qwen_client():
             raise RuntimeError(
                 "未安装依赖包，请执行: pip install openai httpx"
             ) from exc
-        # 显式传入 http_client 以绕过系统代理配置与 httpx 版本兼容问题
+        # trust_env=False 忽略系统代理，避免本地代理配置干扰云端 API 连接
         _qwen_client = OpenAI(
             api_key=DASHSCOPE_API_KEY,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            http_client=httpx.Client(),
+            http_client=httpx.Client(trust_env=False),
         )
     return _qwen_client
 
