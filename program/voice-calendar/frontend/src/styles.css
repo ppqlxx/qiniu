@@ -125,6 +125,9 @@ button {
   display: grid;
   gap: 18px;
   min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(45, 212, 191, 0.3) transparent;
 }
 
 .history-main-card {
@@ -229,6 +232,10 @@ button {
   grid-template-rows: auto auto 1fr;
   gap: 16px;
   overflow: hidden;
+}
+
+.layout-main--history {
+  grid-template-rows: auto auto 1fr;
 }
 
 .topbar,
@@ -1255,6 +1262,65 @@ button {
   white-space: nowrap;
 }
 
+.stats-bar-row--hoverable {
+  position: relative;
+  cursor: default;
+}
+
+.stats-tooltip {
+  display: none;
+  position: absolute;
+  left: 44px;
+  top: calc(100% + 6px);
+  z-index: 200;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.stats-bar-row--hoverable:hover .stats-tooltip {
+  display: block;
+}
+
+.stats-tooltip-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.stats-tooltip-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-tooltip-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.stats-tooltip-date {
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.stats-tooltip-name {
+  color: #0f172a;
+  line-height: 1.4;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1300,6 +1366,10 @@ button {
 .settings-main {
   border-radius: 28px;
   padding: 24px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(45, 212, 191, 0.3) transparent;
 }
 
 .settings-panel {
