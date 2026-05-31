@@ -16,3 +16,4 @@ program/voice-calendar/backend/instance/
 program/voice-calendar/backend/__pycache__/
 program/voice-calendar/backend/**/__pycache__/
 program/voice-calendar/backend/*.log
+deploy.sh
