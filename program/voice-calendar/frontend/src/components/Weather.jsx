@@ -27,57 +27,90 @@ function getWeatherInfo(code) {
   return WMO_MAP[code] ?? { icon: "🌡", label: "未知" };
 }
 
-export function useWeather() {
+async function fetchWeatherByCoords(lat, lon) {
+  const res = await fetch(
+    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&temperature_unit=celsius`
+  );
+  const data = await res.json();
+  return data.current_weather;
+}
+
+async function geocodeCity(cityName) {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&limit=1`
+  );
+  const data = await res.json();
+  if (!data.length) return null;
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), city: cityName };
+}
+
+async function reverseGeocode(lat, lon) {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+  );
+  const data = await res.json();
+  return (
+    data.address?.city ||
+    data.address?.town ||
+    data.address?.county ||
+    ""
+  );
+}
+
+export function useWeather({ temperatureUnit = "celsius", city = "" } = {}) {
   const [weather, setWeather] = useState(null);
   const [status, setStatus] = useState("idle");
 
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setStatus("error");
-      return;
-    }
     setStatus("loading");
 
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        const { latitude: lat, longitude: lon } = coords;
-        try {
-          const res = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&temperature_unit=celsius`
+    async function load() {
+      try {
+        let lat, lon, resolvedCity;
+
+        if (city.trim()) {
+          const geo = await geocodeCity(city.trim());
+          if (!geo) { setStatus("error"); return; }
+          lat = geo.lat;
+          lon = geo.lon;
+          resolvedCity = geo.city;
+        } else {
+          if (!navigator.geolocation) { setStatus("error"); return; }
+          const pos = await new Promise((resolve, reject) =>
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
           );
-          const data = await res.json();
-          const cw = data.current_weather;
-
-          let city = "";
-          try {
-            const geoRes = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
-            );
-            const geoData = await geoRes.json();
-            city =
-              geoData.address?.city ||
-              geoData.address?.town ||
-              geoData.address?.county ||
-              "";
-          } catch {}
-
-          const info = getWeatherInfo(cw.weathercode);
-          setWeather({ temp: Math.round(cw.temperature), icon: info.icon, label: info.label, city });
-          setStatus("ok");
-        } catch {
-          setStatus("error");
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+          resolvedCity = await reverseGeocode(lat, lon).catch(() => "");
         }
-      },
-      () => setStatus("error"),
-      { timeout: 8000 }
-    );
-  }, []);
+
+        const cw = await fetchWeatherByCoords(lat, lon);
+        const info = getWeatherInfo(cw.weathercode);
+        setWeather({ tempC: Math.round(cw.temperature), icon: info.icon, label: info.label, city: resolvedCity });
+        setStatus("ok");
+      } catch {
+        setStatus("error");
+      }
+    }
+
+    load();
+  }, [city]);
 
   const icon = status === "ok" && weather ? weather.icon : "☁️";
+
+  let tempDisplay = "--";
+  if (status === "ok" && weather) {
+    if (temperatureUnit === "fahrenheit") {
+      tempDisplay = `${Math.round(weather.tempC * 9 / 5 + 32)}°F`;
+    } else {
+      tempDisplay = `${weather.tempC}°C`;
+    }
+  }
+
   const tempText =
     status === "error" || !weather ? "--°C" :
     status === "loading" ? "" :
-    `${weather.temp}°C · ${weather.city || weather.label}`;
+    `${tempDisplay} · ${weather.city || weather.label}`;
 
   return { icon, tempText };
 }
