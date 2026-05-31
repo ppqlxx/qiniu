@@ -1,15 +1,87 @@
+import os
+import re
+import time
+import uuid
 from datetime import datetime, timedelta
+from io import BytesIO
 
-from flask import Blueprint, request
+from flask import Blueprint, request, send_from_directory
+from werkzeug.datastructures import FileStorage
 
 from database import db
 from llm import parse_voice_intent
-from models import Event
+from models import Event, VoiceLog
 from response import error_response, ok_response
 from stt import transcribe_audio
 from time_utils import parse_iso_datetime
 
 voice_bp = Blueprint("voice", __name__, url_prefix="/api/voice")
+
+AUDIO_STORE = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "audio_store")
+)
+AUDIO_STORE_MAX = 100
+_SAFE_FILENAME_RE = re.compile(r'^\d+_[0-9a-f]{8}\.(webm|wav|mp3|ogg|m4a)$')
+
+
+def _save_audio_file(audio_bytes: bytes, original_filename: str) -> str:
+    os.makedirs(AUDIO_STORE, exist_ok=True)
+    ext = os.path.splitext(original_filename or "")[-1].lower() or ".webm"
+    filename = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}{ext}"
+    with open(os.path.join(AUDIO_STORE, filename), "wb") as f:
+        f.write(audio_bytes)
+    return filename
+
+
+def _cleanup_old_audio():
+    """超出 AUDIO_STORE_MAX 条的旧音频文件从磁盘删除，同时清理 24h 以上的孤立文件。"""
+    excess = (
+        VoiceLog.query
+        .filter(VoiceLog.audio_file.isnot(None))
+        .order_by(VoiceLog.created_at.desc())
+        .offset(AUDIO_STORE_MAX)
+        .all()
+    )
+    for log in excess:
+        path = os.path.join(AUDIO_STORE, log.audio_file)
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        log.audio_file = None
+    if excess:
+        db.session.commit()
+
+    if not os.path.isdir(AUDIO_STORE):
+        return
+    referenced = {
+        row.audio_file
+        for row in VoiceLog.query.filter(VoiceLog.audio_file.isnot(None)).all()
+    }
+    cutoff = time.time() - 86400
+    for fname in os.listdir(AUDIO_STORE):
+        if fname not in referenced:
+            fpath = os.path.join(AUDIO_STORE, fname)
+            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                try:
+                    os.unlink(fpath)
+                except OSError:
+                    pass
+
+
+def _write_voice_log(transcript: str, action: str, result_msg: str, audio_file=None):
+    log = VoiceLog(
+        transcript=transcript,
+        action=action or "unknown",
+        result_msg=result_msg,
+        audio_file=audio_file,
+    )
+    db.session.add(log)
+    db.session.commit()
+    try:
+        _cleanup_old_audio()
+    except Exception:
+        pass
 
 
 class VoiceIntentError(Exception):
@@ -138,6 +210,7 @@ def confirm_intent():
     body = request.get_json() or {}
     intents = body.get("intents")
     transcript = (body.get("transcript") or "").strip()
+    audio_filename = (body.get("audio_filename") or "").strip() or None
 
     # 兼容前端传单个 intent 对象的情况
     if isinstance(intents, dict):
@@ -168,28 +241,46 @@ def confirm_intent():
                                   data={"transcript": transcript, "intent": intent})
 
     combined_message = "；".join(messages)
-    # 取第一个 intent 作为跳转依据（add/delete 场景）
     primary_intent = intents[0] if intents else None
+
+    actions = list({i.get("action") for i in intents if i.get("action")})
+    primary_action = actions[0] if len(actions) == 1 else ("mixed" if actions else "unknown")
+    try:
+        _write_voice_log(transcript, primary_action, combined_message, audio_filename)
+    except Exception:
+        pass  # 日志写入失败不影响主流程
+
     return ok_response(
         message=combined_message,
         intent=primary_intent,
-        data={"transcript": transcript, "events": all_events, "results": results},
+        data={"transcript": transcript, "events": all_events, "results": results,
+              "audio_filename": audio_filename},
     )
 
 
 @voice_bp.route("/transcribe", methods=["POST"])
 def transcribe_only():
-    """仅做语音转文字，快速返回转写结果，不调用 LLM。"""
-    audio_file = request.files.get("audio")
-    if not audio_file:
+    """仅做语音转文字，快速返回转写结果，不调用 LLM。同时将音频保存至 audio_store。"""
+    uploaded = request.files.get("audio")
+    if not uploaded:
         return error_response("AUDIO_EMPTY", "请上传音频文件，字段名为 audio", status=400)
 
+    audio_bytes = uploaded.read()
+    original_name = uploaded.filename or "recording.webm"
+
+    audio_filename = None
     try:
-        transcript = transcribe_audio(audio_file)
+        audio_filename = _save_audio_file(audio_bytes, original_name)
+    except Exception:
+        pass  # 保存失败不阻断 STT
+
+    fake_storage = FileStorage(stream=BytesIO(audio_bytes), filename=original_name)
+    try:
+        transcript = transcribe_audio(fake_storage)
     except Exception as exc:
         return error_response("STT_FAILED", f"语音识别失败：{str(exc)}", status=500)
 
-    return ok_response(data={"transcript": transcript})
+    return ok_response(data={"transcript": transcript, "audio_filename": audio_filename})
 
 
 @voice_bp.route("/execute", methods=["POST"])
@@ -277,3 +368,30 @@ def handle_voice():
         intent=intent,
         data={"transcript": transcript, **data},
     )
+
+
+@voice_bp.route("/logs", methods=["GET"])
+def get_voice_logs():
+    """返回最近 N 条语音操作历史（默认 20 条，最多 100 条）。"""
+    try:
+        limit = min(int(request.args.get("limit", 20)), 100)
+    except (TypeError, ValueError):
+        limit = 20
+    logs = (
+        VoiceLog.query
+        .order_by(VoiceLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return ok_response(data={"logs": [log.to_dict() for log in logs]})
+
+
+@voice_bp.route("/audio/<filename>", methods=["GET"])
+def get_audio_file(filename):
+    """提供音频文件回放，文件名须符合存储时的命名规则。"""
+    if not _SAFE_FILENAME_RE.match(filename):
+        return error_response("INVALID_FILENAME", "非法文件名", status=400)
+    filepath = os.path.join(AUDIO_STORE, filename)
+    if not os.path.isfile(filepath):
+        return error_response("NOT_FOUND", "音频文件不存在", status=404)
+    return send_from_directory(os.path.abspath(AUDIO_STORE), filename)
