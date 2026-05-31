@@ -21,6 +21,21 @@ export const postVoice = (audioBlob) => {
   return api.post("/api/voice", form).then(unwrap);
 };
 
+export const transcribeAudio = (audioBlob) => {
+  const form = new FormData();
+  form.append("audio", audioBlob, "recording.webm");
+  return api.post("/api/voice/transcribe", form).then(unwrap);
+};
+
+export const parseVoiceIntent = (transcript) =>
+  api.post("/api/voice/parse", { transcript }).then(unwrap);
+
+export const confirmVoiceIntent = (intents, transcript) =>
+  api.post("/api/voice/confirm", { intents, transcript }).then(unwrap);
+
+export const executeVoiceIntent = (transcript) =>
+  api.post("/api/voice/execute", { transcript }).then(unwrap);
+
 export const getErrorMessage = (error) =>
   error?.response?.data?.message ||
   error?.response?.data?.error ||
