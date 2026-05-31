@@ -25,3 +25,32 @@ class Event(db.Model):
             "description": self.description,
             "created_at": self.created_at.isoformat(),
         }
+
+
+class AppSettings(db.Model):
+    __tablename__ = "app_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    settings_json = db.Column(db.Text, nullable=False, default="{}")
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class VoiceLog(db.Model):
+    __tablename__ = "voice_logs"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    transcript = db.Column(db.Text)
+    action     = db.Column(db.String(20))
+    result_msg = db.Column(db.Text)
+    audio_file = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "transcript": self.transcript,
+            "action": self.action,
+            "result_msg": self.result_msg,
+            "audio_file": self.audio_file,
+            "created_at": self.created_at.isoformat(),
+        }
