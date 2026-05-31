@@ -29,6 +29,7 @@ export default function VoiceButton({ onResult, onError }) {
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
+  const cancelledRef = useRef(false);
 
   const isRecording = status === "recording";
   const isBusy = status === "processing" || status === "parsing" || status === "executing";
@@ -37,9 +38,7 @@ export default function VoiceButton({ onResult, onError }) {
     if (!isModalOpen) return undefined;
 
     const handleKeyDown = (event) => {
-      if (event.key === "Escape" && !isRecording && !isBusy) {
-        setIsModalOpen(false);
-      }
+      if (event.key === "Escape") closeModal();
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -47,6 +46,7 @@ export default function VoiceButton({ onResult, onError }) {
   }, [isModalOpen, isBusy, isRecording]);
 
   const openModal = () => {
+    cancelledRef.current = false;
     setTranscriptPreview("");
     setPendingIntents([]);
     setPendingTranscript("");
@@ -59,7 +59,12 @@ export default function VoiceButton({ onResult, onError }) {
   };
 
   const closeModal = () => {
-    if (isRecording || isBusy) return;
+    cancelledRef.current = true;
+    if (isRecording) {
+      recorderRef.current?.stop();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     setStatus("idle");
     setPendingIntents([]);
     setIsModalOpen(false);
@@ -80,6 +85,8 @@ export default function VoiceButton({ onResult, onError }) {
       };
 
       recorder.onstop = async () => {
+        if (cancelledRef.current) return;
+
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         if (!blob.size) {
           setStatus("idle");
@@ -92,10 +99,12 @@ export default function VoiceButton({ onResult, onError }) {
         let transcript = "";
         try {
           const sttResult = await transcribeAudio(blob);
+          if (cancelledRef.current) return;
           transcript = sttResult.data?.transcript || "";
           setTranscriptPreview(transcript);
           setPendingTranscript(transcript);
         } catch (error) {
+          if (cancelledRef.current) return;
           setStatus("error");
           onError?.(getErrorMessage(error), error.response?.data?.data);
           return;
@@ -105,18 +114,18 @@ export default function VoiceButton({ onResult, onError }) {
         setStatus("parsing");
         try {
           const parseResult = await parseVoiceIntent(transcript);
+          if (cancelledRef.current) return;
           const intents = parseResult.data?.intents || [];
 
-          // 未识别到日历操作
           if (intents.length === 0) {
             setStatus("done");
             return;
           }
 
-          // 全部是 query 则直接执行，否则弹确认
           if (!needsConfirm(intents)) {
             setStatus("executing");
             const result = await confirmVoiceIntent(intents, transcript);
+            if (cancelledRef.current) return;
             onResult?.(result);
             setStatus("done");
             return;
@@ -125,6 +134,7 @@ export default function VoiceButton({ onResult, onError }) {
           setPendingIntents(intents);
           setStatus("confirming");
         } catch (error) {
+          if (cancelledRef.current) return;
           setStatus("error");
           onError?.(getErrorMessage(error), error.response?.data?.data);
         }

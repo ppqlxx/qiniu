@@ -46,16 +46,15 @@ button {
 .layout-sidebar,
 .layout-main,
 .layout-detail {
-  min-height: calc(100vh - 40px);
+  position: sticky;
+  top: 20px;
+  height: calc(100vh - 40px);
 }
 
 .layout-sidebar {
-  position: sticky;
-  top: 20px;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-height: calc(100vh - 40px);
   overflow-y: auto;
   padding: 22px 18px;
   border-radius: 30px;
@@ -222,12 +221,10 @@ button {
 }
 
 .layout-main {
-  position: sticky;
-  top: 20px;
   display: grid;
   grid-template-rows: auto auto 1fr;
   gap: 16px;
-  max-height: calc(100vh - 40px);
+  overflow: hidden;
 }
 
 .topbar,
@@ -266,6 +263,29 @@ button {
 .topbar-left span {
   color: #64748b;
   font-size: 13px;
+}
+
+.topbar-date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-nav-btn {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 16px;
+  color: #94a3b8;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+
+.date-nav-btn:hover {
+  color: #0f766e;
+  background: #f0fdfa;
 }
 
 .topbar-center {
@@ -363,6 +383,56 @@ button {
   box-shadow: 0 8px 18px rgba(45, 212, 191, 0.12);
 }
 
+/* ── 底部悬浮话筒 ── */
+/* left 公式：左padding(20) + 左列(2fr) + gap(20) + 中间列一半(7fr/2)
+   = 40px + (100vw - 80px) × 11/24 */
+.voice-fab {
+  position: fixed;
+  bottom: 0;
+  left: calc(40px + (100vw - 80px) * 11 / 24);
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 12px 56px 0;
+}
+
+.voice-fab .voice-trigger {
+  display: block;
+  width: 68px;
+  height: 68px;
+  font-size: 28px;
+  opacity: 0.6;
+  transform: translateY(34px);
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+  filter: drop-shadow(0 6px 18px rgba(45, 212, 191, 0.4));
+}
+
+.voice-fab:hover .voice-trigger {
+  transform: translateY(-20px);
+  opacity: 1;
+}
+
+.voice-fab-tip {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  white-space: nowrap;
+  font-size: 12px;
+  color: #0f766e;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 999px;
+  padding: 5px 14px;
+  box-shadow: 0 4px 16px rgba(15, 118, 110, 0.12);
+  opacity: 0;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  pointer-events: none;
+}
+
+.voice-fab:hover .voice-fab-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .voice-trigger {
   width: 58px;
   height: 58px;
@@ -410,9 +480,9 @@ button {
 }
 
 .calendar-panel {
-  min-height: calc(100vh - 180px);
-  max-height: calc(100vh - 180px);
+  min-height: 0;
   overflow: hidden;
+  box-shadow: none;
 }
 
 .calendar-scroll {
@@ -553,6 +623,22 @@ button {
 }
 
 /* ── 自定义周视图表格 ── */
+.agenda-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0 14px;
+}
+
+.agenda-nav-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f766e;
+  min-width: 96px;
+  text-align: center;
+}
+
 .week-agenda-table {
   width: 100%;
   border-collapse: separate;
@@ -678,12 +764,9 @@ button {
 }
 
 .layout-detail {
-  position: sticky;
-  top: 20px;
   display: grid;
   align-content: start;
   gap: 20px;
-  max-height: calc(100vh - 40px);
   overflow-y: auto;
 }
 
@@ -1016,8 +1099,7 @@ button {
   .layout-main,
   .layout-detail {
     top: 16px;
-    max-height: calc(100vh - 32px);
-    min-height: calc(100vh - 32px);
+    height: calc(100vh - 32px);
   }
 }
 
